@@ -145,6 +145,19 @@ public:
      */
     void setKeyValue(int field, double value);
     void clearKeyValues();
+    /** Release one field's override (0/1/2), leaving the others alone. */
+    void clearKeyValue(int field);
+    /** True if field 0/1/2 currently carries a typed override. */
+    bool hasKeyValue(int field) const;
+
+    /**
+     * Re-solve the last raw cursor point and re-emit cursorMoved.
+     *
+     * Typing a value or toggling a lock changes the solved point even though the
+     * mouse never moved. Without this the guide line and the compass only catch
+     * up on the next mouse move.
+     */
+    void refreshCursor();
 
     // ---------------------------------------------------------------------
     // State getters

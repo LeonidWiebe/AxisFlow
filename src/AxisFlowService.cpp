@@ -121,9 +121,14 @@ void AxisFlowService::performAction(AxisAction a)
     case AxisAction::LockX: (lock() == AxisLock::X) ? clearLocks() : lockAxis(AxisLock::X); break;
     case AxisAction::LockY: (lock() == AxisLock::Y) ? clearLocks() : lockAxis(AxisLock::Y); break;
     case AxisAction::LockZ: (lock() == AxisLock::Z) ? clearLocks() : lockAxis(AxisLock::Z); break;
-    case AxisAction::ClearLocks: clearLocks();               break;
+    // Escape is the single "let go" key: it releases the axis lock AND every
+    // typed override, so the fields start following the cursor again.
+    case AxisAction::ClearLocks: clearLocks(); clearKeyValues(); break;
     default: break;
     }
+
+    // A lock or a mode change moves the solved point without any mouse motion.
+    refreshCursor();
 }
 
 void AxisFlowService::confirm(const Base::Vector3d& worldPt)
@@ -211,6 +216,57 @@ void AxisFlowService::setKeyValue(int field, double value)
         }
     }
     Q_EMIT stateChanged();
+    refreshCursor();   // the typed value moves the point even with a still mouse
+}
+
+void AxisFlowService::clearKeyValue(int field)
+{
+    if (_solver.getMode() == CompassMode::Rectangular) {
+        switch (field) {
+        case 0: _solver.clearValueX(); break;
+        case 1: _solver.clearValueY(); break;
+        case 2: _solver.clearValueZ(); break;
+        default: break;
+        }
+    }
+    else {
+        switch (field) {
+        case 0: _solver.clearValueDist();  break;
+        case 1: _solver.clearValueAngle(); break;
+        case 2: _solver.clearValueZ();     break;
+        default: break;
+        }
+    }
+    Q_EMIT stateChanged();
+    refreshCursor();
+}
+
+bool AxisFlowService::hasKeyValue(int field) const
+{
+    if (_solver.getMode() == CompassMode::Rectangular) {
+        switch (field) {
+        case 0: return _solver.hasValueX();
+        case 1: return _solver.hasValueY();
+        case 2: return _solver.hasValueZ();
+        default: return false;
+        }
+    }
+    switch (field) {
+    case 0: return _solver.hasValueDist();
+    case 1: return _solver.hasValueAngle();
+    case 2: return _solver.hasValueZ();
+    default: return false;
+    }
+}
+
+void AxisFlowService::refreshCursor()
+{
+    if (!_active) return;
+    // Re-solve from the raw point the solver already holds; no mouse motion is
+    // needed for a typed value or a new lock to take effect.
+    const Base::Vector3d solved =
+        _constrainEnabled ? _solver.getSolvedPoint() : _solver.getRawPoint();
+    Q_EMIT cursorMoved(solved);
 }
 
 void AxisFlowService::clearKeyValues()

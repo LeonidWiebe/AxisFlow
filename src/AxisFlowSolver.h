@@ -64,6 +64,20 @@ public:
     /** Clear all keyboard overrides (public; used by the service on confirm). */
     void clearKeyValues();
 
+    /** True if the X/Y/Z or dist/angle override for this raw slot is set. */
+    bool hasValueX() const;
+    bool hasValueY() const;
+    bool hasValueZ() const;
+    bool hasValueDist() const;
+    bool hasValueAngle() const;
+
+    /** Release a single override, leaving the others in place. */
+    void clearValueX();
+    void clearValueY();
+    void clearValueZ();
+    void clearValueDist();
+    void clearValueAngle();
+
     // ----- output -----
     /** Final snapped point in world space. */
     Base::Vector3d getSolvedPoint() const;

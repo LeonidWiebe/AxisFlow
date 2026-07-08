@@ -2,15 +2,23 @@
 
 #include "AxisFlowEventFilter.h"
 #include "AxisFlowService.h"
+#include "AxisFlowPanel.h"
+
+#include <Gui/View3DInventor.h>
 
 #include <QtCore/QEvent>
 #include <QtGui/QKeyEvent>
 #include <QtWidgets/QApplication>
+#include <QtWidgets/QWidget>
 
 namespace AxisFlowGui {
 
-AxisFlowEventFilter::AxisFlowEventFilter(QObject* parent)
+AxisFlowEventFilter::AxisFlowEventFilter(Gui::View3DInventor* view,
+                                         bool ownsInput,
+                                         QObject* parent)
     : QObject(parent)
+    , _view(view)
+    , _ownsInput(ownsInput)
 {
 }
 
@@ -31,40 +39,87 @@ void AxisFlowEventFilter::remove()
     _installed = false;
 }
 
+// ---------------------------------------------------------------------------
+
+bool AxisFlowEventFilter::isValueChar(const QKeyEvent* ke)
+{
+    const QString& t = ke->text();
+    if (t.isEmpty()) return false;
+    const QChar c = t.at(0);
+    return c.isDigit()
+        || c == QLatin1Char('.')
+        || c == QLatin1Char(',')
+        || c == QLatin1Char('-');
+}
+
+bool AxisFlowEventFilter::focusInView() const
+{
+    if (!_view) return false;
+
+    QWidget* fw = QApplication::focusWidget();
+    if (!fw) return false;
+
+    auto* vw = qobject_cast<QWidget*>(_view);
+    if (!vw) return false;
+
+    return fw == vw || vw->isAncestorOf(fw);
+}
+
+bool AxisFlowEventFilter::claims(const QKeyEvent* ke) const
+{
+    // Modified keys (Ctrl+S, Alt+F4, ...) always belong to the application.
+    if (ke->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
+        return false;
+
+    if (AxisFlowService::instance().actionForKey(ke->key()) != AxisAction::None)
+        return true;
+
+    return _ownsInput && isValueChar(ke);
+}
+
+// ---------------------------------------------------------------------------
+
 bool AxisFlowEventFilter::eventFilter(QObject* watched, QEvent* ev)
 {
-    if (ev->type() != QEvent::KeyPress)
+    const QEvent::Type t = ev->type();
+    if (t != QEvent::KeyPress && t != QEvent::ShortcutOverride)
+        return QObject::eventFilter(watched, ev);
+
+    if (!AxisFlowService::instance().isActive())
+        return QObject::eventFilter(watched, ev);
+
+    // Only while the 3-D view holds focus. With focus in the panel, its own
+    // widgets handle typing and its event filter handles the action keys.
+    if (!focusInView())
         return QObject::eventFilter(watched, ev);
 
     auto* ke = static_cast<QKeyEvent*>(ev);
-    if (ke->isAutoRepeat())
+    if (!claims(ke))
         return QObject::eventFilter(watched, ev);
 
-    // Reserved for the host tool (Draft): never consume these so numeric entry,
-    // point commit and command-abort keep working in Draft's own fields.
-    //   digits / '.' / '-'  -> not bound, fall through naturally
-    //   Enter / Return       -> Draft commits the typed point
-    //   Escape               -> Draft aborts the command
-    //   Tab                  -> Draft field navigation
-    switch (ke->key()) {
-    case Qt::Key_Return:
-    case Qt::Key_Enter:
-    case Qt::Key_Escape:
-    case Qt::Key_Tab:
-    case Qt::Key_Backtab:
-        return QObject::eventFilter(watched, ev);
-    default:
-        break;
+    // Stop Qt from resolving this key as a global QAction shortcut (digits are
+    // bound to Std_ViewTop and friends). Accepting the override makes Qt deliver
+    // an ordinary KeyPress next, which is where we do the work.
+    if (t == QEvent::ShortcutOverride) {
+        ev->accept();
+        return true;
     }
 
-    // AxisFlow owns its geometric lock/mode keys globally (they are letters and
-    // never collide with Draft's numeric input). Any key bound in the keymap is
-    // executed and consumed; everything else falls through untouched.
+    if (ke->isAutoRepeat())
+        return true;   // claimed, but do not repeat-fire a lock toggle
+
     AxisFlowService& svc = AxisFlowService::instance();
     AxisAction a = svc.actionForKey(ke->key());
     if (a != AxisAction::None) {
         svc.performAction(a);
         return true;
+    }
+
+    // "Just start typing": seed the panel's primary field. Focus moves there, so
+    // the rest of the number is typed normally and never reaches this filter.
+    if (_ownsInput && isValueChar(ke)) {
+        if (AxisFlowPanel::instance()->startTyping(ke->text().at(0)))
+            return true;
     }
 
     return QObject::eventFilter(watched, ev);

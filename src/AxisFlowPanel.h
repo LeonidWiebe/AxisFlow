@@ -42,6 +42,14 @@ public:
     void setLockState(int lockedField);   // -1 none, 0 X, 1 Y, 2 Z
     void focusField(int index);
 
+    /**
+     * "Just start typing": a printable character arrived while the 3-D view had
+     * focus. Focus the primary field (X / Distance), seed it with the character
+     * and push the value as a keyboard override. From then on the field holds
+     * focus, so the rest of the number is typed normally.
+     */
+    bool startTyping(QChar ch);
+
 protected:
     void keyPressEvent(QKeyEvent* e) override;
     void closeEvent(QCloseEvent* e) override;
@@ -60,6 +68,12 @@ private:
     void buildUi();
     void wireToService();
     double parseField(QLineEdit* edit) const;
+    /** Parse text with units ("1500", "1,5 m", "2 ft"); NaN if unparsable. */
+    static double parseQuantity(const QString& text);
+    /** Push a field's text to the service as a keyboard override. */
+    void pushFieldValue(int index, const QString& text);
+    /** True for keys that edit the number rather than trigger an action. */
+    static bool isValueKey(const QKeyEvent* ke);
 
     QLabel*      _title  {nullptr};
     QToolButton* _powerBtn {nullptr};

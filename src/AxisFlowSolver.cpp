@@ -183,4 +183,20 @@ void AxisFlowSolver::clearKeyboardValues()
     _kDist = _kAngle = NaN;
 }
 
+// --- override queries / per-field release --------------------------------
+// An override is "set" when it is not NaN. Keeping the sentinel in one place
+// means the UI can ask instead of shadowing the state and drifting out of sync.
+
+bool AxisFlowSolver::hasValueX() const     { return !std::isnan(_kX); }
+bool AxisFlowSolver::hasValueY() const     { return !std::isnan(_kY); }
+bool AxisFlowSolver::hasValueZ() const     { return !std::isnan(_kZ); }
+bool AxisFlowSolver::hasValueDist() const  { return !std::isnan(_kDist); }
+bool AxisFlowSolver::hasValueAngle() const { return !std::isnan(_kAngle); }
+
+void AxisFlowSolver::clearValueX()     { _kX = NaN; }
+void AxisFlowSolver::clearValueY()     { _kY = NaN; }
+void AxisFlowSolver::clearValueZ()     { _kZ = NaN; }
+void AxisFlowSolver::clearValueDist()  { _kDist = NaN; }
+void AxisFlowSolver::clearValueAngle() { _kAngle = NaN; }
+
 } // namespace AxisFlowGui

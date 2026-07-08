@@ -64,6 +64,9 @@ void AxisFlowTool::activate(bool withPositionSource)
     SoSeparator* root = static_cast<SoSeparator*>(viewer->getSceneGraph());
 
     if (withPositionSource) {
+        // Own tool: AxisFlow owns the keyboard and the constraint. A previous
+        // adapter session may have left constraining off.
+        AxisFlowService::instance().setConstrainEnabled(true);
         _eventCB = new SoEventCallback;
         _eventCB->ref();
         _eventCB->addEventCallback(SoEvent::getClassTypeId(), coinEventCB, this);
@@ -79,13 +82,13 @@ void AxisFlowTool::activate(bool withPositionSource)
     panel->move(pos);
     panel->show();
 
-    // Adapter mode has no Coin key source: the 3-D view keeps focus while a
-    // Draft/Arch tool draws. Install an app-wide filter so keys reach AxisFlow
-    // without first clicking the panel. Standalone uses the Coin callback.
-    if (!withPositionSource) {
-        _keyFilter = new AxisFlowEventFilter(this);
-        _keyFilter->install();
-    }
+    // Keys must be claimed at the Qt level, not in the Coin callback: FreeCAD
+    // binds bare digits to global QActions (2 -> Std_ViewTop), and Qt resolves
+    // shortcuts before the key ever reaches the 3-D view widget.
+    //   own tool -> also claim digits ("just start typing")
+    //   adapter  -> claim only bound action keys; digits belong to Draft
+    _keyFilter = new AxisFlowEventFilter(_view, withPositionSource, this);
+    _keyFilter->install();
 
     AxisFlowService::instance().activate();
 
@@ -161,14 +164,25 @@ void AxisFlowTool::handleCoinEvent(SoEventCallback* node)
         const auto* ke = static_cast<const SoKeyboardEvent*>(event);
         if (ke->getState() != SoButtonEvent::DOWN) return;
 
+        AxisFlowService& svc = AxisFlowService::instance();
+
         int qtKey = coinKeyToQt(ke->getKey());
         if (qtKey != 0) {
-            AxisFlowService& svc = AxisFlowService::instance();
             AxisAction a = svc.actionForKey(qtKey);
             if (a != AxisAction::None) {
                 svc.performAction(a);
                 node->setHandled();
+                return;
             }
+        }
+
+        // "Just start typing": an unbound printable character starts a value
+        // entry in the panel. Focus lands on the field, so every following
+        // keystroke goes to Qt directly and never reaches this callback.
+        const char c = ke->getPrintableCharacter();
+        if ((c >= '0' && c <= '9') || c == '.' || c == ',' || c == '-') {
+            if (AxisFlowPanel::instance()->startTyping(QChar::fromLatin1(c)))
+                node->setHandled();
         }
     }
 }
