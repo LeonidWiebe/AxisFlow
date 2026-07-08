@@ -3,6 +3,7 @@
 #include "AxisFlowTool.h"
 #include "AxisFlowPanel.h"
 #include "AxisFlowEventFilter.h"
+#include "AxisFlowSettings.h"
 
 #include <Gui/View3DInventor.h>
 #include <Gui/View3DInventorViewer.h>
@@ -10,6 +11,10 @@
 #include <Inventor/nodes/SoSeparator.h>
 #include <Inventor/nodes/SoEventCallback.h>
 #include <Inventor/nodes/SoCamera.h>
+#include <Inventor/nodes/SoOrthographicCamera.h>
+#include <Inventor/nodes/SoPerspectiveCamera.h>
+#include <Inventor/SoRenderManager.h>
+#include <Inventor/sensors/SoNodeSensor.h>
 #include <Inventor/events/SoMouseButtonEvent.h>
 #include <Inventor/events/SoLocation2Event.h>
 #include <Inventor/events/SoKeyboardEvent.h>
@@ -20,6 +25,8 @@
 #include <Base/Vector3D.h>
 
 #include <QtGui/QKeyEvent>   // Qt::Key_*
+
+#include <cmath>
 
 namespace AxisFlowGui {
 
@@ -32,6 +39,9 @@ AxisFlowTool::AxisFlowTool(Gui::View3DInventor* view, QObject* parent)
     AxisFlowService& svc = AxisFlowService::instance();
     connect(&svc, &AxisFlowService::cursorMoved,  this, &AxisFlowTool::onCursorMoved);
     connect(&svc, &AxisFlowService::stateChanged, this, &AxisFlowTool::onServiceStateChanged);
+    connect(&svc, &AxisFlowService::activeChanged, this, &AxisFlowTool::onActiveChanged);
+    connect(&AxisFlowSettings::instance(), &AxisFlowSettings::changed,
+            this, &AxisFlowTool::onSettingsChanged);
 
     _compass = new AxisFlowCompass;
 }
@@ -73,11 +83,19 @@ void AxisFlowTool::activate(bool withPositionSource)
     // Draft/Arch tool draws. Install an app-wide filter so keys reach AxisFlow
     // without first clicking the panel. Standalone uses the Coin callback.
     if (!withPositionSource) {
-        _keyFilter = new AxisFlowEventFilter(_view, this);
+        _keyFilter = new AxisFlowEventFilter(this);
         _keyFilter->install();
     }
 
     AxisFlowService::instance().activate();
+
+    // First paint: orient to the working plane, size to the pixel setting and
+    // apply "always show compass" before anything moves.
+    syncCompassPlane();
+    syncCompassSize();
+    applyModeToUi();
+    updateCompassVisibility();
+    attachCameraSensor();
 }
 
 void AxisFlowTool::deactivate()
@@ -86,6 +104,8 @@ void AxisFlowTool::deactivate()
     _active = false;
 
     AxisFlowService::instance().deactivate();
+
+    detachCameraSensor();
 
     if (_keyFilter) {
         _keyFilter->remove();
@@ -211,6 +231,105 @@ void AxisFlowTool::applyModeToUi()
     _compass->setMode(polar ? CompassMode::Polar : CompassMode::Rectangular);
 }
 
+void AxisFlowTool::syncCompassPlane()
+{
+    AxisFlowService& svc = AxisFlowService::instance();
+    const Base::Vector3d u = svc.planeU();
+    const Base::Vector3d v = svc.planeV();
+    const Base::Vector3d n = svc.planeNormal();
+
+    _compass->setPlane(SbVec3f(float(u.x), float(u.y), float(u.z)),
+                       SbVec3f(float(v.x), float(v.y), float(v.z)),
+                       SbVec3f(float(n.x), float(n.y), float(n.z)));
+}
+
+void AxisFlowTool::syncCompassSize()
+{
+    // The setting is in PIXELS, the scene graph works in world units, so the
+    // conversion needs the camera. Perspective cameras additionally depend on
+    // the distance to the compass, hence the recompute on every cursor move.
+    if (!_view) return;
+
+    Gui::View3DInventorViewer* viewer = _view->getViewer();
+    if (!viewer) return;
+
+    SoRenderManager* rm = viewer->getSoRenderManager();
+    if (!rm) return;
+
+    SoCamera* cam = rm->getCamera();
+    if (!cam) return;
+
+    const SbVec2s vpPix = rm->getViewportRegion().getViewportSizePixels();
+    const int hPix = vpPix[1];
+    if (hPix <= 0) return;
+
+    float worldHeight = 0.0f;
+    if (cam->isOfType(SoOrthographicCamera::getClassTypeId())) {
+        worldHeight = static_cast<SoOrthographicCamera*>(cam)->height.getValue();
+    }
+    else if (cam->isOfType(SoPerspectiveCamera::getClassTypeId())) {
+        auto* pc = static_cast<SoPerspectiveCamera*>(cam);
+        const Base::Vector3d o = AxisFlowService::instance().origin();
+        const SbVec3f worldOrigin(float(o.x), float(o.y), float(o.z));
+        const float dist = (worldOrigin - cam->position.getValue()).length();
+        worldHeight = 2.0f * dist * std::tan(pc->heightAngle.getValue() * 0.5f);
+    }
+    else {
+        return;   // unknown camera type: leave the last radius alone
+    }
+
+    const float worldPerPixel = worldHeight / float(hPix);
+    const int sizePx = AxisFlowSettings::instance().compassSizePx();
+    _compass->setRadius(0.5f * float(sizePx) * worldPerPixel);
+}
+
+void AxisFlowTool::onSettingsChanged()
+{
+    if (!_compass) return;
+    _compass->applySettings();
+    syncCompassSize();
+    updateCompassVisibility();
+}
+
+void AxisFlowTool::updateCompassVisibility()
+{
+    if (!_compass) return;
+    // "Always show compass" keeps it on screen while the module is loaded, even
+    // when AxisFlow is toggled off; otherwise the compass follows the service.
+    const bool always = AxisFlowSettings::instance().alwaysShowCompass();
+    _compass->setVisible(AxisFlowService::instance().isActive() || always);
+}
+
+void AxisFlowTool::cameraChangedCB(void* userData, SoSensor*)
+{
+    static_cast<AxisFlowTool*>(userData)->syncCompassSize();
+}
+
+void AxisFlowTool::attachCameraSensor()
+{
+    if (_camSensor || !_view) return;
+
+    Gui::View3DInventorViewer* viewer = _view->getViewer();
+    if (!viewer) return;
+    SoRenderManager* rm = viewer->getSoRenderManager();
+    if (!rm) return;
+    SoCamera* cam = rm->getCamera();
+    if (!cam) return;
+
+    // Without this the compass keeps the size it had when the session started:
+    // in adapter mode nothing drives cursorMoved, and zooming never resizes it.
+    _camSensor = new SoNodeSensor(&AxisFlowTool::cameraChangedCB, this);
+    _camSensor->attach(cam);
+}
+
+void AxisFlowTool::detachCameraSensor()
+{
+    if (!_camSensor) return;
+    _camSensor->detach();
+    delete _camSensor;
+    _camSensor = nullptr;
+}
+
 int AxisFlowTool::coinKeyToQt(int coinKey)
 {
     switch (coinKey) {
@@ -235,12 +354,31 @@ void AxisFlowTool::onCursorMoved(Base::Vector3d solved)
     _compass->setOrigin(SbVec3f(float(o.x), float(o.y), float(o.z)));
     _compass->setCursorPoint(SbVec3f(
         float(solved.x), float(solved.y), float(solved.z)));
+
+    // Keeps the compass a constant size on screen through zoom and, for a
+    // perspective camera, through changes of distance.
+    syncCompassSize();
 }
 
 void AxisFlowTool::onServiceStateChanged()
 {
-    // Keep the compass mode in sync (the panel manages its own display).
+    // Mode drives the contour shape (square vs circle); the plane may have been
+    // pushed by an adapter or by setPlane() from Python.
     applyModeToUi();
+    syncCompassPlane();
+}
+
+void AxisFlowTool::onActiveChanged(bool active)
+{
+    // The session (compass in scene, key filter, panel instance) stays alive;
+    // activation just shows or hides the UI. This lets the global ToggleActive
+    // key -- or the panel's power button -- flip AxisFlow on/off without tearing
+    // the whole session down.
+    updateCompassVisibility();
+
+    AxisFlowPanel* panel = AxisFlowPanel::instance();
+    if (active) panel->show();
+    else        panel->hide();
 }
 
 } // namespace AxisFlowGui

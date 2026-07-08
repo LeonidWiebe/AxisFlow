@@ -1,6 +1,8 @@
 #pragma once
 
 #include <map>
+#include <string>
+#include <vector>
 
 namespace AxisFlowGui {
 
@@ -11,6 +13,7 @@ namespace AxisFlowGui {
  */
 enum class AxisAction {
     None,
+    ToggleActive,   // enable/disable AxisFlow (the only globally-handled action)
     ToggleMode,
     SmartLock,
     LockX,
@@ -33,6 +36,30 @@ public:
     void       remove(int qtKey);
     void       clear();
     AxisAction action(int qtKey) const;
+
+    /** First Qt key code bound to @p a, or 0 if the action is unbound. */
+    int keyFor(AxisAction a) const;
+
+    /** Every Qt key code bound to @p a (an action may have several, e.g. the
+     *  main Return and the numpad Enter). Empty if unbound. */
+    std::vector<int> keysFor(AxisAction a) const;
+
+    /** Bind @p a to exactly @p keys, dropping any previous binding of @p a.
+     *  This is what keeps the live map and the stored settings in sync. */
+    void bind(AxisAction a, const std::vector<int>& keys);
+
+    /** Read-only view of the map (used when persisting to settings). */
+    const std::map<int, AxisAction>& map() const { return _map; }
+
+    /** Restore the built-in defaults (used by "reset settings"). */
+    void setDefaults();
+
+    /** Stable names used as settings keys, e.g. "LockX". */
+    static const char* name(AxisAction a);
+    static AxisAction  fromName(const std::string& s);
+
+    /** All actions that can be bound, in a stable order (for persistence/UI). */
+    static const std::vector<AxisAction>& allActions();
 
 private:
     std::map<int, AxisAction> _map;

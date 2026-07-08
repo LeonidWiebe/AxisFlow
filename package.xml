@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="1">
+  <name>AxisFlow</name>
+  <version>0.1.1</version>
+  <date>2026-07-07</date>
+  <description>
+    Dynamic drawing assistant for FreeCAD
+  </description>
+  <maintainer>
+    Leonid Wiebe with Claude Opus 4.8
+  </maintainer>
+  <license>LGPL-2.1</license>
+</package>

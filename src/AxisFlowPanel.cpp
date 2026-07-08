@@ -6,7 +6,11 @@
 
 #include <Gui/MainWindow.h>
 
-#include <QtCore/QCoreApplication>
+#include <QtCore/QEvent>
+#include <QtGui/QCloseEvent>
+#include <QtGui/QFont>
+#include <QtGui/QMouseEvent>
+#include <QtWidgets/QStyle>
 
 #include <cmath>
 #include <limits>
@@ -38,6 +42,25 @@ void AxisFlowPanel::buildUi()
     mainLayout->setContentsMargins(8, 6, 8, 6);
     mainLayout->setSpacing(4);
 
+    // ---- Title bar: name + power (off) button ----
+    auto* titleRow = new QHBoxLayout;
+    _title = new QLabel(QStringLiteral("AxisFlow"));
+    QFont tf = _title->font();
+    tf.setBold(true);
+    _title->setFont(tf);
+    _title->installEventFilter(this);   // drag the frameless window by its title
+
+    _powerBtn = new QToolButton;
+    _powerBtn->setIcon(style()->standardIcon(QStyle::SP_TitleBarCloseButton));
+    _powerBtn->setToolTip(QLatin1String("Turn AxisFlow off"));
+    _powerBtn->setAutoRaise(true);
+    _powerBtn->setCursor(Qt::PointingHandCursor);
+
+    titleRow->addWidget(_title);
+    titleRow->addStretch(1);
+    titleRow->addWidget(_powerBtn);
+    mainLayout->addLayout(titleRow);
+
     auto* rowA = new QHBoxLayout;
     _lockA  = new QCheckBox;  _lockA->setToolTip(QLatin1String("Lock this axis"));
     _labelA = new QLabel(QStringLiteral("X"));
@@ -58,6 +81,15 @@ void AxisFlowPanel::buildUi()
 
     _modeBtn = new QPushButton(QStringLiteral("Rect"));
 
+    // Variant A: the fields are a live read-out of the constrained point, fed by
+    // cursorMoved. Numeric entry is Draft's job, so the fields are read-only and
+    // never take keyboard focus (nothing here competes with Draft's inputs).
+    for (QLineEdit* e : {_editA, _editB, _editC}) {
+        e->setReadOnly(true);
+        e->setFocusPolicy(Qt::NoFocus);
+        e->setPlaceholderText(QString(QChar(0x2014)));   // em dash, encoding-safe
+    }
+
     mainLayout->addLayout(rowA);
     mainLayout->addLayout(rowB);
     mainLayout->addLayout(rowC);
@@ -71,6 +103,12 @@ void AxisFlowPanel::wireToService()
     // React to service state.
     connect(&svc, &AxisFlowService::stateChanged, this, &AxisFlowPanel::onServiceState);
     connect(&svc, &AxisFlowService::cursorMoved,  this, &AxisFlowPanel::onCursorMoved);
+
+    // Power button -> turn AxisFlow off (deactivate). The session stays alive;
+    // the global ToggleActive key can bring it back. Full teardown is done by
+    // the Python adapter's uninstall().
+    connect(_powerBtn, &QToolButton::clicked, this,
+            [](bool){ AxisFlowService::instance().deactivate(); });
 
     // Mode button -> service.
     connect(_modeBtn, &QPushButton::clicked, this,
@@ -91,26 +129,10 @@ void AxisFlowPanel::wireToService()
         (s.lock() == AxisLock::Z) ? s.clearLocks() : s.lockAxis(AxisLock::Z);
     });
 
-    // Typed values -> live keyboard overrides.
-    auto notifyChanged = [](int fieldIdx) {
-        return [fieldIdx](const QString& text) {
-            bool ok;
-            double v = text.toDouble(&ok);
-            if (ok) AxisFlowService::instance().setKeyValue(fieldIdx, v);
-        };
-    };
-    connect(_editA, &QLineEdit::textEdited, this, notifyChanged(0));
-    connect(_editB, &QLineEdit::textEdited, this, notifyChanged(1));
-    connect(_editC, &QLineEdit::textEdited, this, notifyChanged(2));
-
-    // Enter in a field -> whatever action is bound to Return in the keymap.
-    auto onReturn = []() {
-        AxisFlowService& s = AxisFlowService::instance();
-        s.performAction(s.actionForKey(Qt::Key_Return));
-    };
-    connect(_editA, &QLineEdit::returnPressed, this, onReturn);
-    connect(_editB, &QLineEdit::returnPressed, this, onReturn);
-    connect(_editC, &QLineEdit::returnPressed, this, onReturn);
+    // No typed-value wiring here: in the Draft adapter (variant A) numeric entry
+    // is Draft's job and the fields are read-only. AxisFlow contributes the
+    // geometric lock (checkboxes above, or the global lock keys) and the point
+    // is constrained through the snap hook.
 
     // Initial sync.
     onServiceState();
@@ -165,23 +187,38 @@ void AxisFlowPanel::focusField(int index)
     }
 }
 
-bool AxisFlowPanel::startTyping(QKeyEvent* ke)
+bool AxisFlowPanel::eventFilter(QObject* obj, QEvent* ev)
 {
-    QLineEdit* target = _editA;   // X (rectangular) or Distance (polar)
-    if (!target || !target->isVisible())
-        return false;
+    // Drag the frameless window by its title label. (The value fields are
+    // read-only and never focused in variant A, so no key filtering is needed
+    // here — the global filter handles lock/mode keys and Draft keeps the rest.)
+    if (obj == _title) {
+        if (ev->type() == QEvent::MouseButtonPress) {
+            auto* me = static_cast<QMouseEvent*>(ev);
+            if (me->button() == Qt::LeftButton) {
+                _dragging   = true;
+                _dragOffset = me->globalPosition().toPoint() - frameGeometry().topLeft();
+                return true;
+            }
+        }
+        else if (ev->type() == QEvent::MouseMove && _dragging) {
+            auto* me = static_cast<QMouseEvent*>(ev);
+            move(me->globalPosition().toPoint() - _dragOffset);
+            return true;
+        }
+        else if (ev->type() == QEvent::MouseButtonRelease) {
+            _dragging = false;
+        }
+    }
 
-    target->setFocus(Qt::OtherFocusReason);
-    target->selectAll();   // first char overwrites the live readout
+    return QWidget::eventFilter(obj, ev);
+}
 
-    // Re-post a copy (not the original, which the caller still owns) so the edit
-    // is applied on the next loop pass, by which point focus is on the field and
-    // the app-wide filter no longer intercepts. Qt deletes the posted event.
-    auto* copy = new QKeyEvent(QEvent::KeyPress, ke->key(), ke->modifiers(),
-                               ke->text(), ke->isAutoRepeat(),
-                               static_cast<ushort>(ke->count()));
-    QCoreApplication::postEvent(target, copy);
-    return true;
+void AxisFlowPanel::closeEvent(QCloseEvent* e)
+{
+    // Closing the window turns AxisFlow off.
+    AxisFlowService::instance().deactivate();
+    e->accept();
 }
 
 // ---------------------------------------------------------------------------

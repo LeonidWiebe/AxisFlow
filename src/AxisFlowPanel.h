@@ -7,7 +7,9 @@
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QPushButton>
+#include <QtWidgets/QToolButton>
 #include <QtGui/QKeyEvent>
+#include <QtCore/QPoint>
 
 #include <Base/Vector3D.h>
 
@@ -40,16 +42,15 @@ public:
     void setLockState(int lockedField);   // -1 none, 0 X, 1 Y, 2 Z
     void focusField(int index);
 
-    /**
-     * Begin value entry from a key that arrived while the 3-D view had focus
-     * (adapter mode). Focuses the primary field (X / Distance), selects its
-     * live readout so the first char overwrites it, and re-posts the key there
-     * so it is processed as normal typing. Returns true if handled.
-     */
-    bool startTyping(QKeyEvent* ke);
-
 protected:
     void keyPressEvent(QKeyEvent* e) override;
+    void closeEvent(QCloseEvent* e) override;
+    /**
+     * Filters the child line edits so bound letter keys (X/Y/Z/Space/...) act as
+     * AxisFlow actions instead of being typed, while digits still edit the field.
+     * Also drives window dragging from the title bar.
+     */
+    bool eventFilter(QObject* obj, QEvent* ev) override;
 
 private Q_SLOTS:
     void onServiceState();
@@ -59,6 +60,9 @@ private:
     void buildUi();
     void wireToService();
     double parseField(QLineEdit* edit) const;
+
+    QLabel*      _title  {nullptr};
+    QToolButton* _powerBtn {nullptr};
 
     QCheckBox*   _lockA {nullptr};
     QCheckBox*   _lockB {nullptr};
@@ -72,6 +76,10 @@ private:
     QPushButton* _modeBtn {nullptr};
 
     bool         _polar { false };
+
+    // Frameless-window drag state (title bar).
+    bool         _dragging { false };
+    QPoint       _dragOffset;
 };
 
 } // namespace AxisFlowGui

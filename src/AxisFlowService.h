@@ -38,6 +38,21 @@ public:
     void activate();
     void deactivate();
     bool isActive() const { return _active; }
+    /** Flip active state (bound to the global ToggleActive hotkey). */
+    void toggleActive();
+
+    /**
+     * Whether solve()/updateCursor() actually constrain the point.
+     *
+     * In the Draft adapter this is turned OFF: Draft already constrains the
+     * point itself (Snapper.mask -> Snapper.constrain -> projection onto the
+     * working-plane axis) before our hook ever sees it, so constraining again
+     * would apply two independent locks. With this off, the axis lock is kept
+     * purely as UI state: it still drives the compass and the panel, while the
+     * point passes through untouched. Standalone mode leaves it ON.
+     */
+    void setConstrainEnabled(bool on);
+    bool constrainEnabled() const { return _constrainEnabled; }
 
     // ---------------------------------------------------------------------
     // Core query
@@ -71,6 +86,20 @@ public:
     Hotkeys&       hotkeys()       { return _hotkeys; }
     const Hotkeys& hotkeys() const { return _hotkeys; }
     AxisAction     actionForKey(int qtKey) const { return _hotkeys.action(qtKey); }
+
+    /**
+     * Pull the stored key bindings out of AxisFlowSettings on top of the
+     * built-in defaults. Called lazily on the first activation, because the
+     * parameter tree only exists once App is up.
+     */
+    void loadHotkeysFromSettings();
+    /**
+     * Bind a key to an action. @p persist writes the whole map to the settings;
+     * pass false for temporary, session-scoped rebinds (the Draft adapter
+     * unbinds X/Y/Z/Enter/Escape while it is installed and must not clobber the
+     * user's stored layout).
+     */
+    void setHotkey(int qtKey, AxisAction a, bool persist = true);
     /** Execute a semantic action (used by both the panel and the Coin handler). */
     void           performAction(AxisAction a);
 
@@ -137,6 +166,8 @@ public:
 Q_SIGNALS:
     /** Mode / lock / key value / plane / origin changed. */
     void stateChanged();
+    /** Active state toggled on/off (UI shows/hides in response). */
+    void activeChanged(bool active);
     /** A point was committed as the new origin. */
     void pointConfirmed(Base::Vector3d worldPt);
     /** The cursor moved; carries the solved (constrained) world point. */
@@ -151,6 +182,8 @@ private:
     AxisFlowSolver _solver;
     Hotkeys        _hotkeys;
     bool           _active { false };
+    bool           _constrainEnabled { true };   // off in the Draft adapter
+    bool           _hotkeysLoaded { false };     // settings pulled in yet?
 };
 
 } // namespace AxisFlowGui

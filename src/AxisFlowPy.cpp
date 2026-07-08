@@ -1,6 +1,7 @@
 #include "PreCompiled.h"
 
 #include <string>
+#include <vector>
 
 #include <Base/GeometryPyCXX.h>   // Py::Vector <-> Base::Vector3d
 #include <Base/Vector3D.h>
@@ -11,6 +12,8 @@
 #include <Gui/View3DInventor.h>
 
 #include "AxisFlowService.h"
+#include "AxisFlowSettings.h"
+#include "AxisFlowCompass.h"
 #include "AxisFlowTool.h"
 
 using namespace AxisFlowGui;
@@ -34,6 +37,7 @@ static Gui::View3DInventor* activeView3D()
 
 static AxisAction actionFromString(const std::string& s)
 {
+    if (s == "toggleactive") return AxisAction::ToggleActive;
     if (s == "togglemode") return AxisAction::ToggleMode;
     if (s == "smartlock")  return AxisAction::SmartLock;
     if (s == "lockx")      return AxisAction::LockX;
@@ -61,6 +65,20 @@ namespace {
 PyObject* axisflow_isActive(PyObject*, PyObject*)
 {
     return PyBool_FromLong(AxisFlowService::instance().isActive() ? 1 : 0);
+}
+
+PyObject* axisflow_setConstrainEnabled(PyObject*, PyObject* args)
+{
+    int on = 1;
+    if (!PyArg_ParseTuple(args, "p", &on))
+        return nullptr;
+    AxisFlowService::instance().setConstrainEnabled(on != 0);
+    Py_RETURN_NONE;
+}
+
+PyObject* axisflow_constrainEnabled(PyObject*, PyObject*)
+{
+    return PyBool_FromLong(AxisFlowService::instance().constrainEnabled() ? 1 : 0);
 }
 
 PyObject* axisflow_activate(PyObject*, PyObject*)
@@ -282,19 +300,147 @@ PyObject* axisflow_setHotkey(PyObject*, PyObject* args)
 {
     int qtKey = 0;
     const char* action = nullptr;
-    if (!PyArg_ParseTuple(args, "is", &qtKey, &action))
+    int persist = 1;
+    if (!PyArg_ParseTuple(args, "is|p", &qtKey, &action, &persist))
         return nullptr;
     std::string s(action ? action : "");
-    if (s == "none")
-        AxisFlowService::instance().hotkeys().remove(qtKey);
-    else
-        AxisFlowService::instance().hotkeys().set(qtKey, actionFromString(s));
+    // 'none' unbinds. persist=False keeps the change session-scoped (used by
+    // the Draft adapter, which must not overwrite the user's stored layout).
+    AxisFlowService::instance().setHotkey(qtKey, actionFromString(s), persist != 0);
     Py_RETURN_NONE;
+}
+
+// ---------------------------------------------------------------------------
+// Settings (block C): ParameterGrp-backed, shared by every consumer.
+// ---------------------------------------------------------------------------
+
+PyObject* axisflow_getSettings(PyObject*, PyObject*)
+{
+    AxisFlowSettings& s = AxisFlowSettings::instance();
+    PyObject* d = PyDict_New();
+    if (!d) return nullptr;
+
+    auto setItem = [d](const char* k, PyObject* v) {
+        if (v) { PyDict_SetItemString(d, k, v); Py_DECREF(v); }
+    };
+    setItem("compassSize",      PyLong_FromLong(s.compassSizePx()));
+    setItem("axisThickness",    PyLong_FromLong(s.axisThicknessPx()));
+    setItem("axisStartPct",     PyFloat_FromDouble(s.axisStartPct()));
+    setItem("axisLengthPct",    PyFloat_FromDouble(s.axisLengthPct()));
+    setItem("axisColorX",       PyLong_FromUnsignedLong(s.axisColorX()));
+    setItem("axisColorY",       PyLong_FromUnsignedLong(s.axisColorY()));
+    setItem("fillTransparency", PyFloat_FromDouble(s.fillTransparency()));
+    setItem("alwaysShowCompass", PyBool_FromLong(s.alwaysShowCompass() ? 1 : 0));
+
+    // Hotkeys as {'SmartLock': [16777220, 16777221], ...}; [] means unbound.
+    PyObject* hk = PyDict_New();
+    if (hk) {
+        const Hotkeys& h = AxisFlowService::instance().hotkeys();
+        for (AxisAction a : Hotkeys::allActions()) {
+            const std::vector<int> keys = h.keysFor(a);
+            PyObject* lst = PyList_New(0);
+            if (!lst) continue;
+            for (int k : keys) {
+                PyObject* v = PyLong_FromLong(k);
+                if (v) { PyList_Append(lst, v); Py_DECREF(v); }
+            }
+            PyDict_SetItemString(hk, Hotkeys::name(a), lst);
+            Py_DECREF(lst);
+        }
+        PyDict_SetItemString(d, "hotkeys", hk);
+        Py_DECREF(hk);
+    }
+    return d;
+}
+
+PyObject* axisflow_setSetting(PyObject*, PyObject* args)
+{
+    const char* name = nullptr;
+    PyObject*   val  = nullptr;
+    if (!PyArg_ParseTuple(args, "sO", &name, &val))
+        return nullptr;
+
+    AxisFlowSettings& s = AxisFlowSettings::instance();
+    const std::string k(name ? name : "");
+
+    if (k == "compassSize")            s.setCompassSizePx(static_cast<int>(PyLong_AsLong(val)));
+    else if (k == "axisThickness")     s.setAxisThicknessPx(static_cast<int>(PyLong_AsLong(val)));
+    else if (k == "axisStartPct")      s.setAxisStartPct(PyFloat_AsDouble(val));
+    else if (k == "axisLengthPct")     s.setAxisLengthPct(PyFloat_AsDouble(val));
+    else if (k == "axisColorX")        s.setAxisColorX(PyLong_AsUnsignedLong(val));
+    else if (k == "axisColorY")        s.setAxisColorY(PyLong_AsUnsignedLong(val));
+    else if (k == "fillTransparency")  s.setFillTransparency(PyFloat_AsDouble(val));
+    else if (k == "alwaysShowCompass") s.setAlwaysShowCompass(PyObject_IsTrue(val) == 1);
+    else {
+        PyErr_Format(PyExc_KeyError, "unknown AxisFlow setting: %s", k.c_str());
+        return nullptr;
+    }
+
+    if (PyErr_Occurred())   // a bad value type surfaced from PyLong/PyFloat
+        return nullptr;
+    Py_RETURN_NONE;
+}
+
+PyObject* axisflow_resetSettings(PyObject*, PyObject*)
+{
+    AxisFlowSettings::instance().resetDefaults();
+    // Rebuild the live key map from the (now clean) settings.
+    AxisFlowService::instance().hotkeys().setDefaults();
+    AxisFlowService::instance().loadHotkeysFromSettings();
+    Py_RETURN_NONE;
+}
+
+PyObject* axisflow_loadHotkeysFromSettings(PyObject*, PyObject*)
+{
+    // Built-in defaults first, then the user's stored overrides on top. Used to
+    // undo session-scoped rebinds (see setHotkey persist=False).
+    AxisFlowService::instance().hotkeys().setDefaults();
+    AxisFlowService::instance().loadHotkeysFromSettings();
+    Py_RETURN_NONE;
+}
+
+PyObject* axisflow_getCompassInfo(PyObject*, PyObject*)
+{
+    // Diagnostics: the compass lives in C++, so when it "disappears" there is no
+    // way to tell a degenerate radius from a hidden switch without this.
+    PyObject* d = PyDict_New();
+    if (!d) return nullptr;
+
+    auto put = [d](const char* k, PyObject* v) {
+        if (v) { PyDict_SetItemString(d, k, v); Py_DECREF(v); }
+    };
+
+    AxisFlowCompass* c = g_session ? g_session->compass() : nullptr;
+    put("hasSession", PyBool_FromLong(g_session ? 1 : 0));
+    put("hasCompass", PyBool_FromLong(c ? 1 : 0));
+    if (c) {
+        put("radius",  PyFloat_FromDouble(double(c->radius())));
+        put("visible", PyBool_FromLong(c->visible() ? 1 : 0));
+    }
+
+    AxisFlowService& svc = AxisFlowService::instance();
+    put("active", PyBool_FromLong(svc.isActive() ? 1 : 0));
+    put("mode",   PyUnicode_FromString(svc.mode() == CompassMode::Polar ? "polar" : "rect"));
+
+    const Base::Vector3d o = svc.origin();
+    PyObject* org = Py_BuildValue("(ddd)", o.x, o.y, o.z);
+    put("origin", org);
+
+    const Base::Vector3d u = svc.planeU(), v = svc.planeV(), n = svc.planeNormal();
+    put("planeU", Py_BuildValue("(ddd)", u.x, u.y, u.z));
+    put("planeV", Py_BuildValue("(ddd)", v.x, v.y, v.z));
+    put("planeN", Py_BuildValue("(ddd)", n.x, n.y, n.z));
+    return d;
 }
 
 PyMethodDef AxisFlowMethods[] = {
     {"isActive",       axisflow_isActive,       METH_NOARGS,
      "isActive() -> bool. True if the AxisFlow constraint service is active."},
+    {"setConstrainEnabled", axisflow_setConstrainEnabled, METH_VARARGS,
+     "setConstrainEnabled(bool). Off in the Draft adapter: keep the lock as UI "
+     "state only and let Draft do the constraining (avoids a double lock)."},
+    {"constrainEnabled",    axisflow_constrainEnabled,    METH_NOARGS,
+     "constrainEnabled() -> bool."},
     {"activate",       axisflow_activate,       METH_NOARGS,
      "activate(). Enable the AxisFlow constraint service."},
     {"deactivate",     axisflow_deactivate,     METH_NOARGS,
@@ -308,7 +454,8 @@ PyMethodDef AxisFlowMethods[] = {
     {"endSession",     axisflow_endSession,     METH_NOARGS,
      "endSession(). Tear down the UI session and deactivate the service."},
     {"setHotkey",      axisflow_setHotkey,      METH_VARARGS,
-     "setHotkey(qtKeyCode, 'togglemode'|'smartlock'|'lockx'|'locky'|'lockz'|'clearlocks'|'none')."},
+     "setHotkey(qtKeyCode, 'toggleactive'|'togglemode'|'smartlock'|'lockx'|'locky'|'lockz'"
+     "|'clearlocks'|'none'[, persist=True]). persist=False = session-scoped rebind."},
     {"confirm",        axisflow_confirm,        METH_VARARGS,
      "confirm(point). Commit a point as the new compass origin."},
     {"setPlane",       axisflow_setPlane,       METH_VARARGS,
@@ -329,6 +476,17 @@ PyMethodDef AxisFlowMethods[] = {
      "clearKeyValues(). Clear keyboard override values."},
     {"getState",       axisflow_getState,       METH_NOARGS,
      "getState() -> dict. Snapshot of the current AxisFlow state."},
+    {"getSettings",    axisflow_getSettings,    METH_NOARGS,
+     "getSettings() -> dict. All persistent options plus the 'hotkeys' map."},
+    {"setSetting",     axisflow_setSetting,     METH_VARARGS,
+     "setSetting(name, value). name in {compassSize, axisThickness, axisStartPct, "
+     "axisLengthPct, axisColorX, axisColorY, fillTransparency, alwaysShowCompass}."},
+    {"resetSettings",  axisflow_resetSettings,  METH_NOARGS,
+     "resetSettings(). Restore built-in defaults (options and hotkeys)."},
+    {"loadHotkeysFromSettings", axisflow_loadHotkeysFromSettings, METH_NOARGS,
+     "loadHotkeysFromSettings(). Re-apply defaults + stored overrides."},
+    {"getCompassInfo", axisflow_getCompassInfo, METH_NOARGS,
+     "getCompassInfo() -> dict. Live compass radius/visibility/mode/plane."},
     {nullptr, nullptr, 0, nullptr}
 };
 

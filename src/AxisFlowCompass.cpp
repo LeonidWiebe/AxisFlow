@@ -1,153 +1,267 @@
 #include "PreCompiled.h"
 
 #include "AxisFlowCompass.h"
-#include "AxisFlowSolver.h"   // for CompassMode enum
+#include "AxisFlowSettings.h"
+#include "AxisFlowSolver.h"   // CompassMode
 
+#include <Inventor/nodes/SoAnnotation.h>
+#include <Inventor/nodes/SoLightModel.h>
 #include <Inventor/nodes/SoSeparator.h>
+#include <Inventor/nodes/SoSwitch.h>
 #include <Inventor/nodes/SoTransform.h>
 #include <Inventor/nodes/SoCoordinate3.h>
 #include <Inventor/nodes/SoLineSet.h>
+#include <Inventor/nodes/SoFaceSet.h>
 #include <Inventor/nodes/SoPointSet.h>
-#include <Inventor/nodes/SoText2.h>
-#include <Inventor/nodes/SoTranslation.h>
 #include <Inventor/nodes/SoBaseColor.h>
+#include <Inventor/nodes/SoMaterial.h>
 #include <Inventor/nodes/SoDrawStyle.h>
-#include <Inventor/SbVec3f.h>
+#include <Inventor/nodes/SoShapeHints.h>
+#include <Inventor/SbMatrix.h>
+#include <Inventor/SbRotation.h>
+
+#include <algorithm>
+#include <cmath>
+#include <vector>
 
 namespace AxisFlowGui {
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
+namespace {
 
-static SoSeparator* makeAxisNode(
-    SoBaseColor*&   outColor,
-    SoCoordinate3*& outCoord,
-    SoLineSet*&     outLine,
-    SoTranslation*& outLabelTrans,
-    SoText2*&       outLabel,
-    const SbColor&  color,
-    const SbVec3f&  dir,
-    float           len,
-    const char*     labelText)
+// Circle tessellation. 64 segments reads as smooth at any sane compass size.
+constexpr int   kCircleSegs = 64;
+constexpr float kPi = 3.14159265358979323846f;
+
+// The fill colour is deliberately NOT a setting: only its transparency is.
+// A pale blue keeps the compass readable over both light and dark models.
+const SbColor kFillColor   (0.62f, 0.62f, 0.86f);
+const SbColor kOutlineColor(0.25f, 0.25f, 0.30f);
+const SbColor kDotColor    (0.10f, 0.10f, 0.10f);
+const SbColor kGuideColor  (1.00f, 0.90f, 0.20f);
+
+SbColor rgbOf(unsigned long rgba)
 {
-    auto* sep = new SoSeparator;
-
-    outColor = new SoBaseColor;
-    outColor->rgb.setValue(color);
-
-    auto* style = new SoDrawStyle;
-    style->lineWidth.setValue(2.0f);
-
-    SbVec3f pts[2] = { SbVec3f(0,0,0), dir * len };
-
-    outCoord = new SoCoordinate3;
-    outCoord->point.setValues(0, 2, pts);
-
-    outLine = new SoLineSet;
-    outLine->numVertices.setValue(2);
-
-    // Label near the tip
-    outLabelTrans = new SoTranslation;
-    outLabelTrans->translation.setValue(dir * (len * 1.1f));
-
-    outLabel = new SoText2;
-    outLabel->string.setValue(labelText);
-
-    sep->addChild(outColor);
-    sep->addChild(style);
-    sep->addChild(outCoord);
-    sep->addChild(outLine);
-    sep->addChild(outLabelTrans);
-    sep->addChild(outLabel);
-
-    return sep;
+    float r, g, b, a;
+    AxisFlowSettings::unpackColor(rgba, r, g, b, a);
+    return SbColor(r, g, b);
 }
 
-// ---------------------------------------------------------------------------
-// AxisFlowCompass
+} // namespace
+
 // ---------------------------------------------------------------------------
 
 AxisFlowCompass::AxisFlowCompass()
 {
     build();
+    applySettings();
+    rebuild();
 }
 
 void AxisFlowCompass::build()
 {
-    _root = new SoSeparator;
-    _root->ref();   // keep alive
+    // SoAnnotation renders after the rest of the scene and ignores the depth
+    // buffer, so the compass never z-fights with a face lying in the working
+    // plane (an Arch wall at z=0 would otherwise swallow it).
+    _root = new SoAnnotation;
+    _root->ref();
 
-    // Master transform — positions/rotates the whole compass
+    // One switch above everything: hiding the compass is a single field write,
+    // and the subgraph keeps its state while hidden.
+    _visSwitch = new SoSwitch;
+    _visSwitch->whichChild.setValue(0);
+    _root->addChild(_visSwitch);
+
+    auto* content = new SoSeparator;
+    _visSwitch->addChild(content);
+
     _transform = new SoTransform;
-    _root->addChild(_transform);
+    content->addChild(_transform);
 
-    // ---- Axes ----
-    SoSeparator* axisX = makeAxisNode(
-        _colorX, _coordX, _lineX, _transLabelX, _labelX,
-        SbColor(1,0,0), SbVec3f(1,0,0), _axisLen, "X");
+    // Overlay graphics must not be shaded: BASE_COLOR makes the rendered colour
+    // exactly the colour we set, on any background and from any view angle.
+    auto* lm = new SoLightModel;
+    lm->model.setValue(SoLightModel::BASE_COLOR);
+    content->addChild(lm);
 
-    SoSeparator* axisY = makeAxisNode(
-        _colorY, _coordY, _lineY, _transLabelY, _labelY,
-        SbColor(0,0.8f,0), SbVec3f(0,1,0), _axisLen, "Y");
+    // The fill is a flat polygon seen from either side; without this it vanishes
+    // when the working plane is viewed from behind.
+    auto* hints = new SoShapeHints;
+    hints->vertexOrdering.setValue(SoShapeHints::COUNTERCLOCKWISE);
+    hints->shapeType.setValue(SoShapeHints::UNKNOWN_SHAPE_TYPE);
+    content->addChild(hints);
 
-    SoSeparator* axisZ = makeAxisNode(
-        _colorZ, _coordZ, _lineZ, _transLabelZ, _labelZ,
-        SbColor(0.2f,0.4f,1), SbVec3f(0,0,1), _axisLen, "Z");
+    // ---- contour: square (child 0) / circle (child 1) ----
+    _contour = new SoSwitch;
+    _contour->whichChild.setValue(0);
 
-    _root->addChild(axisX);
-    _root->addChild(axisY);
-    _root->addChild(axisZ);
-
-    // ---- Origin dot ----
+    auto buildContour = [](SoMaterial*& fill, SoCoordinate3*& coordFill, SoFaceSet*& face,
+                           SoCoordinate3*& coordLine, SoLineSet*& line, SoDrawStyle*& style)
     {
-        auto* dotSep = new SoSeparator;
+        auto* sep = new SoSeparator;
 
-        _colorDot = new SoBaseColor;
-        _colorDot->rgb.setValue(1, 1, 1);
+        fill = new SoMaterial;
+        fill->diffuseColor.setValue(kFillColor);
+        coordFill = new SoCoordinate3;
+        face = new SoFaceSet;
+        sep->addChild(fill);
+        sep->addChild(coordFill);
+        sep->addChild(face);
 
-        _dotStyle = new SoDrawStyle;
-        _dotStyle->pointSize.setValue(6.0f);
+        auto* outColor = new SoBaseColor;
+        outColor->rgb.setValue(kOutlineColor);
+        style = new SoDrawStyle;
+        style->lineWidth.setValue(1.5f);
+        coordLine = new SoCoordinate3;
+        line = new SoLineSet;
+        sep->addChild(outColor);
+        sep->addChild(style);
+        sep->addChild(coordLine);
+        sep->addChild(line);
 
-        _coordDot = new SoCoordinate3;
-        SbVec3f origin(0,0,0);
-        _coordDot->point.setValue(origin);
+        return sep;
+    };
 
-        _dot = new SoPointSet;
+    _contour->addChild(buildContour(_fillSq, _coordSq, _faceSq, _outlineSq, _lineSq, _styleSq));
+    _contour->addChild(buildContour(_fillCi, _coordCi, _faceCi, _outlineCi, _lineCi, _styleCi));
+    content->addChild(_contour);
 
-        dotSep->addChild(_colorDot);
-        dotSep->addChild(_dotStyle);
-        dotSep->addChild(_coordDot);
-        dotSep->addChild(_dot);
+    // ---- centre point ----
+    auto* dotSep = new SoSeparator;
+    _dotColor = new SoBaseColor;
+    _dotColor->rgb.setValue(kDotColor);
+    _dotStyle = new SoDrawStyle;
+    _dotStyle->pointSize.setValue(6.0f);
+    _coordDot = new SoCoordinate3;
+    _coordDot->point.set1Value(0, SbVec3f(0, 0, 0));
+    _dot = new SoPointSet;
+    _dot->numPoints.setValue(1);
+    dotSep->addChild(_dotColor);
+    dotSep->addChild(_dotStyle);
+    dotSep->addChild(_coordDot);
+    dotSep->addChild(_dot);
+    content->addChild(dotSep);
 
-        _root->addChild(dotSep);
-    }
-
-    // ---- Guide line (cursor → origin, yellow) ----
+    // ---- axes: X and Y only (no Z) ----
+    auto buildAxis = [](SoBaseColor*& color, SoDrawStyle*& style,
+                        SoCoordinate3*& coord, SoLineSet*& line)
     {
-        _guideSep = new SoSeparator;
+        auto* sep = new SoSeparator;
+        color = new SoBaseColor;
+        style = new SoDrawStyle;
+        coord = new SoCoordinate3;
+        line  = new SoLineSet;
+        line->numVertices.setValue(2);
+        sep->addChild(color);
+        sep->addChild(style);
+        sep->addChild(coord);
+        sep->addChild(line);
+        return sep;
+    };
 
-        _colorGuide = new SoBaseColor;
-        _colorGuide->rgb.setValue(1, 1, 0);
+    content->addChild(buildAxis(_colorX, _styleX, _coordX, _lineX));
+    content->addChild(buildAxis(_colorY, _styleY, _coordY, _lineY));
 
-        auto* guideStyle = new SoDrawStyle;
-        guideStyle->lineWidth.setValue(1.5f);
-
-        _coordGuide = new SoCoordinate3;
-        SbVec3f pts[2] = { SbVec3f(0,0,0), SbVec3f(0,0,0) };
-        _coordGuide->point.setValues(0, 2, pts);
-
-        _lineGuide = new SoLineSet;
-        _lineGuide->numVertices.setValue(2);
-
-        _guideSep->addChild(_colorGuide);
-        _guideSep->addChild(guideStyle);
-        _guideSep->addChild(_coordGuide);
-        _guideSep->addChild(_lineGuide);
-
-        _root->addChild(_guideSep);
-    }
+    // ---- guide line ----
+    _guideSep = new SoSeparator;
+    _colorGuide = new SoBaseColor;
+    _colorGuide->rgb.setValue(kGuideColor);
+    auto* guideStyle = new SoDrawStyle;
+    guideStyle->lineWidth.setValue(1.0f);
+    guideStyle->linePattern.setValue(0xF0F0);   // dashed
+    _coordGuide = new SoCoordinate3;
+    _lineGuide = new SoLineSet;
+    _lineGuide->numVertices.setValue(2);
+    _guideSep->addChild(_colorGuide);
+    _guideSep->addChild(guideStyle);
+    _guideSep->addChild(_coordGuide);
+    _guideSep->addChild(_lineGuide);
+    content->addChild(_guideSep);
 }
+
+// ---------------------------------------------------------------------------
+
+void AxisFlowCompass::applySettings()
+{
+    const AxisFlowSettings& s = AxisFlowSettings::instance();
+
+    const float t = static_cast<float>(s.axisThicknessPx());
+    _styleX->lineWidth.setValue(t);
+    _styleY->lineWidth.setValue(t);
+    _colorX->rgb.setValue(rgbOf(s.axisColorX()));
+    _colorY->rgb.setValue(rgbOf(s.axisColorY()));
+
+    // A centre point thinner than the axes would look like a rendering glitch.
+    _dotStyle->pointSize.setValue(std::max(4.0f, t * 2.5f));
+
+    const float transp = static_cast<float>(s.fillTransparency());
+    _fillSq->transparency.setValue(transp);
+    _fillCi->transparency.setValue(transp);
+
+    rebuild();   // axis start/length fractions may have changed too
+}
+
+void AxisFlowCompass::rebuild()
+{
+    const AxisFlowSettings& s = AxisFlowSettings::instance();
+    const float R = _radius;
+
+    // ---- square contour: corners at +/-R in the plane ----
+    const SbVec3f sq[4] = {
+        SbVec3f(-R, -R, 0), SbVec3f( R, -R, 0),
+        SbVec3f( R,  R, 0), SbVec3f(-R,  R, 0)
+    };
+    _coordSq->point.setValues(0, 4, sq);
+    _coordSq->point.setNum(4);
+    _faceSq->numVertices.setValue(4);
+
+    SbVec3f sqLoop[5] = { sq[0], sq[1], sq[2], sq[3], sq[0] };
+    _outlineSq->point.setValues(0, 5, sqLoop);
+    _outlineSq->point.setNum(5);
+    _lineSq->numVertices.setValue(5);
+
+    // ---- circle contour ----
+    std::vector<SbVec3f> ci(kCircleSegs);
+    for (int i = 0; i < kCircleSegs; ++i) {
+        const float a = 2.0f * kPi * float(i) / float(kCircleSegs);
+        ci[i] = SbVec3f(R * std::cos(a), R * std::sin(a), 0);
+    }
+    _coordCi->point.setValues(0, kCircleSegs, ci.data());
+    _coordCi->point.setNum(kCircleSegs);
+    _faceCi->numVertices.setValue(kCircleSegs);
+
+    std::vector<SbVec3f> ciLoop(ci);
+    ciLoop.push_back(ci[0]);
+    _outlineCi->point.setValues(0, int(ciLoop.size()), ciLoop.data());
+    _outlineCi->point.setNum(int(ciLoop.size()));
+    _lineCi->numVertices.setValue(int(ciLoop.size()));
+
+    // ---- axes: fractions of the centre-to-contour distance ----
+    const float start = R * static_cast<float>(s.axisStartPct());
+    const float end   = start + R * static_cast<float>(s.axisLengthPct());
+
+    const SbVec3f xs[2] = { SbVec3f(start, 0, 0), SbVec3f(end, 0, 0) };
+    _coordX->point.setValues(0, 2, xs);
+    _coordX->point.setNum(2);
+
+    const SbVec3f ys[2] = { SbVec3f(0, start, 0), SbVec3f(0, end, 0) };
+    _coordY->point.setValues(0, 2, ys);
+    _coordY->point.setNum(2);
+}
+
+void AxisFlowCompass::rebuildGuide()
+{
+    // The subgraph is positioned AND rotated by _transform, so the guide must be
+    // expressed in compass-local coordinates: project the world delta onto the
+    // plane basis (orthonormal, so a dot product is the inverse transform).
+    const SbVec3f d = _cursor - _origin;
+    const SbVec3f local(d.dot(_u), d.dot(_v), d.dot(_n));
+
+    const SbVec3f pts[2] = { SbVec3f(0, 0, 0), local };
+    _coordGuide->point.setValues(0, 2, pts);
+    _coordGuide->point.setNum(2);
+}
+
+// ---------------------------------------------------------------------------
 
 void AxisFlowCompass::setOrigin(const SbVec3f& pt)
 {
@@ -156,9 +270,20 @@ void AxisFlowCompass::setOrigin(const SbVec3f& pt)
     rebuildGuide();
 }
 
-void AxisFlowCompass::setRotation(const SbRotation& rot)
+void AxisFlowCompass::setPlane(const SbVec3f& u, const SbVec3f& v, const SbVec3f& n)
 {
-    _transform->rotation.setValue(rot);
+    _u = u; _v = v; _n = n;
+
+    // Columns of the rotation matrix are the plane axes: local X -> u, Y -> v,
+    // Z -> n. SbMatrix is row-major, hence the transposed-looking assignment.
+    SbMatrix m;
+    m.makeIdentity();
+    m[0][0] = u[0]; m[0][1] = u[1]; m[0][2] = u[2];
+    m[1][0] = v[0]; m[1][1] = v[1]; m[1][2] = v[2];
+    m[2][0] = n[0]; m[2][1] = n[1]; m[2][2] = n[2];
+
+    _transform->rotation.setValue(SbRotation(m));
+    rebuildGuide();
 }
 
 void AxisFlowCompass::setCursorPoint(const SbVec3f& pt)
@@ -167,61 +292,30 @@ void AxisFlowCompass::setCursorPoint(const SbVec3f& pt)
     rebuildGuide();
 }
 
-void AxisFlowCompass::setAxisLength(float len)
+void AxisFlowCompass::setRadius(float worldRadius)
 {
-    _axisLen = len;
-    rebuildAxes();
+    // A degenerate radius collapses the contour and both axes into the centre
+    // point -- which still renders, because points are sized in pixels. That
+    // looks exactly like "the compass disappeared", so refuse the value instead.
+    if (!(worldRadius > 1e-4f) || !std::isfinite(worldRadius))
+        return;
+    if (std::fabs(worldRadius - _radius) < 1e-6f)
+        return;
+    _radius = worldRadius;
+    rebuild();
 }
 
 void AxisFlowCompass::setVisible(bool on)
 {
-    // SoSeparator has no single visibility flag; we use whichChild on a Switch,
-    // but for simplicity here we just clear/add children count.
-    // Easiest: store a SoSwitch at root level.
-    // For now: scale to zero when hidden.
-    _transform->scaleFactor.setValue(on ? SbVec3f(1,1,1) : SbVec3f(0,0,0));
+    _visible = on;
+    _visSwitch->whichChild.setValue(on ? 0 : SO_SWITCH_NONE);
 }
 
 void AxisFlowCompass::setMode(CompassMode mode)
 {
-    if (mode == CompassMode::Polar) {
-        _labelX->string.setValue("D");   // Distance
-        _labelY->string.setValue("A");   // Angle
-    } else {
-        _labelX->string.setValue("X");
-        _labelY->string.setValue("Y");
-    }
-}
-
-// ---------------------------------------------------------------------------
-// private helpers
-// ---------------------------------------------------------------------------
-
-void AxisFlowCompass::rebuildAxes()
-{
-    auto updateAxis = [&](SoCoordinate3* coord,
-                          SoTranslation* labelTrans,
-                          const SbVec3f& dir)
-    {
-        SbVec3f pts[2] = { SbVec3f(0,0,0), dir * _axisLen };
-        coord->point.setValues(0, 2, pts);
-        labelTrans->translation.setValue(dir * (_axisLen * 1.1f));
-    };
-
-    updateAxis(_coordX, _transLabelX, SbVec3f(1,0,0));
-    updateAxis(_coordY, _transLabelY, SbVec3f(0,1,0));
-    updateAxis(_coordZ, _transLabelZ, SbVec3f(0,0,1));
-}
-
-void AxisFlowCompass::rebuildGuide()
-{
-    // The compass subgraph is positioned at _origin via _transform,
-    // so the guide coords must be in compass-LOCAL space.
-    // Local origin = (0,0,0), local cursor = world cursor − world origin.
-    SbVec3f localCursor = _cursor - _origin;
-
-    SbVec3f pts[2] = { SbVec3f(0,0,0), localCursor };
-    _coordGuide->point.setValues(0, 2, pts);
+    // Ortho -> square contour, radial -> circle. Remembered even while hidden.
+    _mode = (mode == CompassMode::Polar) ? 1 : 0;
+    _contour->whichChild.setValue(_mode);
 }
 
 } // namespace AxisFlowGui

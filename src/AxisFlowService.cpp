@@ -1,6 +1,7 @@
 #include "PreCompiled.h"
 
 #include "AxisFlowService.h"
+#include "AxisFlowSettings.h"
 
 namespace AxisFlowGui {
 
@@ -18,10 +19,40 @@ AxisFlowService& AxisFlowService::instance()
 // Activation
 // ---------------------------------------------------------------------------
 
+void AxisFlowService::loadHotkeysFromSettings()
+{
+    AxisFlowSettings::instance().loadHotkeys(_hotkeys);
+    _hotkeysLoaded = true;
+}
+
+void AxisFlowService::setHotkey(int qtKey, AxisAction a, bool persist)
+{
+    if (a == AxisAction::None) {
+        // Unbind just this key.
+        _hotkeys.remove(qtKey);
+    }
+    else {
+        // Rebind the action to exactly this key. Replacing (not adding) is what
+        // keeps the live map in step with the settings, which store one key list
+        // per action: otherwise 'S -> SmartLock' would leave Return/Enter live
+        // but unsaved.
+        _hotkeys.bind(a, { qtKey });
+    }
+
+    if (persist)
+        AxisFlowSettings::instance().saveHotkeys(_hotkeys);
+    Q_EMIT stateChanged();
+}
+
 void AxisFlowService::activate()
 {
     if (_active) return;
+    // First activation: the parameter tree is up by now, so pull the user's
+    // stored key bindings on top of the built-in defaults.
+    if (!_hotkeysLoaded)
+        loadHotkeysFromSettings();
     _active = true;
+    Q_EMIT activeChanged(true);
     Q_EMIT stateChanged();
 }
 
@@ -29,12 +60,26 @@ void AxisFlowService::deactivate()
 {
     if (!_active) return;
     _active = false;
+    Q_EMIT activeChanged(false);
     Q_EMIT stateChanged();
+}
+
+void AxisFlowService::toggleActive()
+{
+    if (_active) deactivate();
+    else         activate();
 }
 
 // ---------------------------------------------------------------------------
 // Core query
 // ---------------------------------------------------------------------------
+
+void AxisFlowService::setConstrainEnabled(bool on)
+{
+    if (_constrainEnabled == on) return;
+    _constrainEnabled = on;
+    Q_EMIT stateChanged();
+}
 
 Base::Vector3d AxisFlowService::solve(const Base::Vector3d& raw,
                                       const Base::Vector3d* last)
@@ -46,6 +91,13 @@ Base::Vector3d AxisFlowService::solve(const Base::Vector3d& raw,
         _solver.setOrigin(*last);
     }
     _solver.setRawPoint(raw);
+
+    // Adapter mode: Draft has already constrained this point (Snapper.mask).
+    // Feed the solver so the compass/read-out stay live, but hand back the
+    // point untouched instead of applying a second, independent lock.
+    if (!_constrainEnabled)
+        return raw;
+
     return _solver.getSolvedPoint();
 }
 
@@ -60,11 +112,15 @@ Base::Vector3d AxisFlowService::updateCursor(const Base::Vector3d& raw,
 void AxisFlowService::performAction(AxisAction a)
 {
     switch (a) {
+    case AxisAction::ToggleActive: toggleActive();           break;
     case AxisAction::ToggleMode: toggleMode();               break;
     case AxisAction::SmartLock:  smartLockToggle();          break;
-    case AxisAction::LockX:      lockAxis(AxisLock::X);       break;
-    case AxisAction::LockY:      lockAxis(AxisLock::Y);       break;
-    case AxisAction::LockZ:      lockAxis(AxisLock::Z);       break;
+    // Lock keys toggle: pressing the bound key again releases the lock. This is
+    // what lets a keyboard-only user clear a lock without Escape (reserved for
+    // Draft in the adapter).
+    case AxisAction::LockX: (lock() == AxisLock::X) ? clearLocks() : lockAxis(AxisLock::X); break;
+    case AxisAction::LockY: (lock() == AxisLock::Y) ? clearLocks() : lockAxis(AxisLock::Y); break;
+    case AxisAction::LockZ: (lock() == AxisLock::Z) ? clearLocks() : lockAxis(AxisLock::Z); break;
     case AxisAction::ClearLocks: clearLocks();               break;
     default: break;
     }

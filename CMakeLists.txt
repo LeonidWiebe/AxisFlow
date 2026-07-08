@@ -89,6 +89,7 @@ set(SOURCES
     src/AxisFlowCompass.cpp
     src/AxisFlowPanel.cpp
     src/AxisFlowEventFilter.cpp
+    src/AxisFlowSettings.cpp
 )
 
 set(HEADERS
@@ -100,12 +101,14 @@ set(HEADERS
     src/AxisFlowCompass.h
     src/AxisFlowPanel.h
     src/AxisFlowEventFilter.h
+    src/AxisFlowSettings.h
 )
 
 qt6_wrap_cpp(MOC_SOURCES
     src/AxisFlowTool.h
     src/AxisFlowService.h
     src/AxisFlowPanel.h
+    src/AxisFlowSettings.h
 )
 
 qt6_add_resources(QRC_SOURCES resources/AxisFlow.qrc)
@@ -173,15 +176,46 @@ set_target_properties(AxisFlow PROPERTIES
 )
 
 # ---------------------------------------------------------------------------
-# Install → FreeCAD user Mod dir
+# Install -> FreeCAD user Mod dir
+#
+# FreeCAD 1.1 versions its user data directory: %APPDATA%/FreeCAD/v1-1/Mod,
+# not %APPDATA%/FreeCAD/Mod. Installing into the unversioned path means FreeCAD
+# never scans the module: no workbench, no InitGui.py, `import AxisFlow` fails.
+#
+# Detected from the filesystem (no Python needed -- find_package(Python3) is
+# requested with Development only, so Python3_EXECUTABLE is empty here).
+# Override explicitly with:
+#   cmake -B build -DFREECAD_MOD_DIR="D:/somewhere/Mod/AxisFlow"
+#
+# NOTE: this is a CACHE variable. After changing FreeCAD versions, delete the
+# build directory (or re-pass -DFREECAD_MOD_DIR), or the stale cached path wins.
 # ---------------------------------------------------------------------------
-set(FREECAD_MOD_DIR "$ENV{APPDATA}/FreeCAD/Mod/AxisFlow"
-    CACHE PATH "Target FreeCAD user Mod directory")
+set(FREECAD_MOD_DIR "" CACHE PATH "Target FreeCAD user Mod dir (empty = autodetect)")
+
+if(NOT FREECAD_MOD_DIR)
+    set(_fc_user "$ENV{APPDATA}/FreeCAD")
+    set(_fc_base "${_fc_user}")
+
+    # Pick the highest versioned directory (v1-1, v1-2, ...) if any exist.
+    file(GLOB _fc_versioned LIST_DIRECTORIES true "${_fc_user}/v*")
+    list(SORT _fc_versioned)
+    foreach(_d IN LISTS _fc_versioned)
+        if(IS_DIRECTORY "${_d}")
+            set(_fc_base "${_d}")
+        endif()
+    endforeach()
+
+    set(_fc_auto "${_fc_base}/Mod/AxisFlow")
+    file(TO_CMAKE_PATH "${_fc_auto}" _fc_auto)
+    set(FREECAD_MOD_DIR "${_fc_auto}" CACHE PATH
+        "Target FreeCAD user Mod dir (empty = autodetect)" FORCE)
+endif()
 
 install(TARGETS AxisFlow
     RUNTIME DESTINATION "${FREECAD_MOD_DIR}"
 )
-install(FILES InitGui.py DESTINATION "${FREECAD_MOD_DIR}")
+install(FILES InitGui.py        DESTINATION "${FREECAD_MOD_DIR}")
+install(FILES axisflow_snap.py  DESTINATION "${FREECAD_MOD_DIR}")
 
 message(STATUS "=== AxisFlow build config ===")
 message(STATUS "  Qt6 dir     : ${Qt6_DIR}")

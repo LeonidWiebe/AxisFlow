@@ -1,16 +1,18 @@
 #pragma once
 
-#include <Inventor/nodes/SoSeparator.h>
-#include <Inventor/nodes/SoTransform.h>
-#include <Inventor/nodes/SoCoordinate3.h>
-#include <Inventor/nodes/SoLineSet.h>
-#include <Inventor/nodes/SoPointSet.h>
-#include <Inventor/nodes/SoText2.h>
-#include <Inventor/nodes/SoTranslation.h>
-#include <Inventor/nodes/SoBaseColor.h>
-#include <Inventor/nodes/SoDrawStyle.h>
 #include <Inventor/SbVec3f.h>
-#include <Inventor/SbRotation.h>
+#include <Inventor/SbColor.h>
+
+class SoSeparator;
+class SoSwitch;
+class SoTransform;
+class SoCoordinate3;
+class SoLineSet;
+class SoFaceSet;
+class SoPointSet;
+class SoBaseColor;
+class SoMaterial;
+class SoDrawStyle;
 
 namespace AxisFlowGui {
 
@@ -19,18 +21,24 @@ enum class CompassMode;
 /**
  * AxisFlowCompass
  *
- * Builds and owns a Coin3D subgraph that renders:
- *  - Three coloured axis lines  (red=X, green=Y, blue=Z)
- *  - A small origin dot
- *  - Axis labels X / Y / Z
- *  - A dashed "snap" guide line from origin to current cursor point
+ * Coin3D subgraph for the AccuDraw-style compass:
  *
- * Usage:
- *   AxisFlowCompass compass;
- *   sceneRoot->addChild(compass.getRootNode());
- *   compass.setOrigin(SbVec3f(x,y,z));
- *   compass.setCursorPoint(SbVec3f(cx,cy,cz));
- *   compass.setRotation(SbRotation(...));
+ *   - a CONTOUR with a transparent fill and a crisp centre point;
+ *   - the contour is a SQUARE in ortho mode and a CIRCLE in radial mode;
+ *   - exactly two axes, X and Y. The Z axis is never drawn -- the compass lies
+ *     in the working plane, and a Z line would only read as clutter;
+ *   - a guide line from the origin to the current cursor point.
+ *
+ * Axis colour, thickness, start offset and length come from AxisFlowSettings.
+ * Start/length are fractions of the centre-to-contour distance, so they hold at
+ * any compass size.
+ *
+ * Geometry is built in compass-LOCAL space (X = plane u, Y = plane v) and placed
+ * by _transform, so setPlane() is what makes the compass lie in the working
+ * plane rather than the world XY plane.
+ *
+ * setRadius() takes a WORLD radius; converting the pixel size from the settings
+ * into world units needs the camera and is therefore the caller's job.
  */
 class AxisFlowCompass
 {
@@ -38,73 +46,86 @@ public:
     AxisFlowCompass();
     ~AxisFlowCompass() = default;
 
-    /** Returns the Coin3D node to insert into the scene graph. */
     SoSeparator* getRootNode() const { return _root; }
 
-    /** Move compass origin to world-space point. */
+    /** Place the compass centre at a world point. */
     void setOrigin(const SbVec3f& pt);
 
-    /** Rotate compass axes (e.g. when aligning to an edge). */
-    void setRotation(const SbRotation& rot);
+    /** Orient the compass to a working plane (orthonormal basis). */
+    void setPlane(const SbVec3f& u, const SbVec3f& v, const SbVec3f& n);
 
-    /** Highlight the guide line from origin to cursor. */
+    /** Guide line endpoint, in world space. */
     void setCursorPoint(const SbVec3f& pt);
 
-    /** Adjust axis length (default 50 mm). */
-    void setAxisLength(float len);
+    /** Centre-to-contour distance, in world units. */
+    void setRadius(float worldRadius);
+    float radius() const { return _radius; }
 
-    /** Show/hide the whole compass. */
     void setVisible(bool on);
+    bool visible() const { return _visible; }
 
-    /** Switch label style (rectangular ↔ polar). */
+    /** Ortho -> square contour, radial -> circle contour. */
     void setMode(CompassMode mode);
+
+    /** Re-read colours, thickness and axis fractions from AxisFlowSettings. */
+    void applySettings();
 
 private:
     void build();
-    void rebuildAxes();
-    void rebuildGuide();
+    void rebuild();          // contour + axes + dot, from _radius and settings
+    void rebuildGuide();     // origin -> cursor, in local space
 
-    SoSeparator*    _root;
+    SoSeparator*   _root       { nullptr };
+    SoSwitch*      _visSwitch  { nullptr };   // whole compass on/off
+    SoTransform*   _transform  { nullptr };
 
-    // Transform positions the compass at the origin point
-    SoTransform*    _transform;
+    // Contour: switch between square (0) and circle (1).
+    SoSwitch*      _contour    { nullptr };
+    SoMaterial*    _fillSq     { nullptr };
+    SoCoordinate3* _coordSq    { nullptr };
+    SoFaceSet*     _faceSq     { nullptr };
+    SoCoordinate3* _outlineSq  { nullptr };
+    SoLineSet*     _lineSq     { nullptr };
+    SoDrawStyle*   _styleSq    { nullptr };
 
-    // ---- Axis X (red) ----
-    SoBaseColor*    _colorX;
-    SoCoordinate3*  _coordX;
-    SoLineSet*      _lineX;
-    SoTranslation*  _transLabelX;
-    SoText2*        _labelX;
+    SoMaterial*    _fillCi     { nullptr };
+    SoCoordinate3* _coordCi    { nullptr };
+    SoFaceSet*     _faceCi     { nullptr };
+    SoCoordinate3* _outlineCi  { nullptr };
+    SoLineSet*     _lineCi     { nullptr };
+    SoDrawStyle*   _styleCi    { nullptr };
 
-    // ---- Axis Y (green) ----
-    SoBaseColor*    _colorY;
-    SoCoordinate3*  _coordY;
-    SoLineSet*      _lineY;
-    SoTranslation*  _transLabelY;
-    SoText2*        _labelY;
+    // Centre point.
+    SoBaseColor*   _dotColor   { nullptr };
+    SoDrawStyle*   _dotStyle   { nullptr };
+    SoCoordinate3* _coordDot   { nullptr };
+    SoPointSet*    _dot        { nullptr };
 
-    // ---- Axis Z (blue) ----
-    SoBaseColor*    _colorZ;
-    SoCoordinate3*  _coordZ;
-    SoLineSet*      _lineZ;
-    SoTranslation*  _transLabelZ;
-    SoText2*        _labelZ;
+    // Axes (X, Y only).
+    SoBaseColor*   _colorX     { nullptr };
+    SoDrawStyle*   _styleX     { nullptr };
+    SoCoordinate3* _coordX     { nullptr };
+    SoLineSet*     _lineX      { nullptr };
 
-    // ---- Origin dot (white) ----
-    SoBaseColor*    _colorDot;
-    SoCoordinate3*  _coordDot;
-    SoDrawStyle*    _dotStyle;
-    SoPointSet*     _dot;
+    SoBaseColor*   _colorY     { nullptr };
+    SoDrawStyle*   _styleY     { nullptr };
+    SoCoordinate3* _coordY     { nullptr };
+    SoLineSet*     _lineY      { nullptr };
 
-    // ---- Guide line (yellow, dashed) ----
-    SoSeparator*    _guideSep;
-    SoBaseColor*    _colorGuide;
-    SoCoordinate3*  _coordGuide;
-    SoLineSet*      _lineGuide;
+    // Guide line.
+    SoSeparator*   _guideSep   { nullptr };
+    SoBaseColor*   _colorGuide { nullptr };
+    SoCoordinate3* _coordGuide { nullptr };
+    SoLineSet*     _lineGuide  { nullptr };
 
-    float           _axisLen { 50.f };
-    SbVec3f         _origin  { 0, 0, 0 };
-    SbVec3f         _cursor  { 0, 0, 0 };
+    float   _radius  { 50.0f };
+    bool    _visible { true };
+    int     _mode    { 0 };   // set via setMode(); 0 = ortho, 1 = radial
+    SbVec3f _origin  { 0, 0, 0 };
+    SbVec3f _cursor  { 0, 0, 0 };
+    SbVec3f _u       { 1, 0, 0 };
+    SbVec3f _v       { 0, 1, 0 };
+    SbVec3f _n       { 0, 0, 1 };
 };
 
 } // namespace AxisFlowGui
