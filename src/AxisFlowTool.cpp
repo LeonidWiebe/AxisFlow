@@ -99,6 +99,11 @@ void AxisFlowTool::activate(bool withPositionSource)
     applyModeToUi();
     updateCompassVisibility();
     attachCameraSensor();
+
+    // AccuDraw model: the caret lives in the active coordinate field from the
+    // moment the tool starts, so typing just works and global shortcuts do not.
+    if (withPositionSource)
+        panel->focusActiveField();
 }
 
 void AxisFlowTool::deactivate()
@@ -164,25 +169,19 @@ void AxisFlowTool::handleCoinEvent(SoEventCallback* node)
         const auto* ke = static_cast<const SoKeyboardEvent*>(event);
         if (ke->getState() != SoButtonEvent::DOWN) return;
 
+        // Value entry is NOT handled here. Two reasons: Qt resolves global
+        // shortcuts before the key ever reaches this callback (see
+        // AxisFlowEventFilter), and SoKeyboardEvent::getPrintableCharacter()
+        // returns '.' as a placeholder for keys with no printable form -- so
+        // Backspace used to type a dot. Typing lives in the Qt filter alone.
         AxisFlowService& svc = AxisFlowService::instance();
-
         int qtKey = coinKeyToQt(ke->getKey());
         if (qtKey != 0) {
             AxisAction a = svc.actionForKey(qtKey);
             if (a != AxisAction::None) {
                 svc.performAction(a);
                 node->setHandled();
-                return;
             }
-        }
-
-        // "Just start typing": an unbound printable character starts a value
-        // entry in the panel. Focus lands on the field, so every following
-        // keystroke goes to Qt directly and never reaches this callback.
-        const char c = ke->getPrintableCharacter();
-        if ((c >= '0' && c <= '9') || c == '.' || c == ',' || c == '-') {
-            if (AxisFlowPanel::instance()->startTyping(QChar::fromLatin1(c)))
-                node->setHandled();
         }
     }
 }
@@ -233,6 +232,11 @@ void AxisFlowTool::confirmPoint()
 
     _compass->setOrigin(SbVec3f(
         float(solved.x), float(solved.y), float(solved.z)));
+
+    // Clicking in the 3-D view hands keyboard focus to the viewport. Take it
+    // straight back, or the next digit becomes a FreeCAD view shortcut.
+    if (_hasPositionSource)
+        AxisFlowPanel::instance()->focusActiveField();
 
     Q_EMIT pointConfirmed(solved);
 }

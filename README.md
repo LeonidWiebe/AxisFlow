@@ -58,6 +58,7 @@ All options are stored in FreeCAD's own parameter tree under `User parameter:Bas
 | `AxisLengthPct` | Float | 0.70 | axis length, same fraction |
 | `AxisColorX` | Unsigned | `0xFF0000FF` | X axis colour (`0xRRGGBBAA`), red by default |
 | `AxisColorY` | Unsigned | `0x00FF00FF` | Y axis colour, green by default |
+| `ActiveFieldColor` | Unsigned | `0xDCDCDCFF` | background of the active coordinate field |
 | `FillTransparency` | Float | 0.65 | transparency of the compass fill (0..1) |
 | `AlwaysShowCompass` | Bool | false | show the compass whenever loaded, not only during a command |
 | `Hotkey.<Action>` | ASCII | see below | comma-separated Qt key codes; empty = unbound |

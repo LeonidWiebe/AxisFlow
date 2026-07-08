@@ -50,6 +50,31 @@ public:
      */
     bool startTyping(QChar ch);
 
+    /** Backspace from the 3-D view: drop the last character of the entry. */
+    bool backspaceEntry();
+    /** Delete/clear the whole entry, releasing its override. */
+    bool clearEntry();
+
+    /**
+     * The field where a value is expected / being typed. Exactly one field is
+     * always active. It follows the axis the cursor leans towards, EXCEPT while
+     * an entry is in progress -- then it is frozen, whatever the cursor does.
+     */
+    int  activeField() const { return _activeField; }
+    void setActiveField(int index);
+
+    /**
+     * Put the blinking caret in the active field and keep it there.
+     *
+     * This is the whole point of the AccuDraw input model: while the caret sits
+     * in a QLineEdit, that widget consumes digits, Backspace and the arrows, so
+     * FreeCAD's global shortcuts (2 -> Std_ViewTop) never fire. Without it we
+     * are forced to intercept keys application-wide and fight Qt for them.
+     */
+    void focusActiveField();
+    /** Tab: move the active status to the next visible field. */
+    void cycleActiveField();
+
 protected:
     void keyPressEvent(QKeyEvent* e) override;
     void closeEvent(QCloseEvent* e) override;
@@ -74,6 +99,14 @@ private:
     void pushFieldValue(int index, const QString& text);
     /** True for keys that edit the number rather than trigger an action. */
     static bool isValueKey(const QKeyEvent* ke);
+    /** True for a character that begins a fresh value entry (digit, sign, dot). */
+    static bool isEntryStartKey(const QKeyEvent* ke);
+    /** The line edit currently receiving typed characters. */
+    QLineEdit* entryEdit();
+    /** Repaint the field backgrounds so the active one stands out. */
+    void refreshActiveHighlight();
+    /** Pick the active field from the axis the cursor leans towards. */
+    void updateActiveFieldFromCursor();
 
     QLabel*      _title  {nullptr};
     QToolButton* _powerBtn {nullptr};
@@ -94,6 +127,12 @@ private:
     // Frameless-window drag state (title bar).
     bool         _dragging { false };
     QPoint       _dragOffset;
+
+    /** Field currently being typed into (-1 = none). Protected from the live
+     *  read-out even before the text parses into a valid number. */
+    int          _entryField { -1 };
+    /** Always 0..2 (0/1 in polar). Frozen while _entryField >= 0. */
+    int          _activeField { 0 };
 };
 
 } // namespace AxisFlowGui

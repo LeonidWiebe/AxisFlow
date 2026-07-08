@@ -5,11 +5,13 @@
 #include "AxisFlowPanel.h"
 
 #include <Gui/View3DInventor.h>
+#include <Gui/MainWindow.h>
 
 #include <QtCore/QEvent>
 #include <QtGui/QKeyEvent>
 #include <QtWidgets/QApplication>
 #include <QtWidgets/QWidget>
+#include <QtWidgets/QLineEdit>
 
 namespace AxisFlowGui {
 
@@ -52,17 +54,42 @@ bool AxisFlowEventFilter::isValueChar(const QKeyEvent* ke)
         || c == QLatin1Char('-');
 }
 
-bool AxisFlowEventFilter::focusInView() const
+bool AxisFlowEventFilter::inScope() const
 {
-    if (!_view) return false;
+    // A modal dialog owns the keyboard, full stop.
+    if (QApplication::activeModalWidget())
+        return false;
 
     QWidget* fw = QApplication::focusWidget();
-    if (!fw) return false;
 
-    auto* vw = qobject_cast<QWidget*>(_view);
-    if (!vw) return false;
+    // No focus widget: this is the state right after an entry ends (clearFocus)
+    // or after a dialog closes. Claim it -- otherwise the next digit is resolved
+    // as a global QAction shortcut and the camera jumps.
+    if (!fw)
+        return true;
 
-    return fw == vw || vw->isAncestorOf(fw);
+    // The panel handles its own keys through its own event filter.
+    if (QWidget* panel = AxisFlowPanel::instance()) {
+        if (fw == panel || panel->isAncestorOf(fw))
+            return false;
+    }
+
+    if (_view) {
+        if (auto* vw = qobject_cast<QWidget*>(_view)) {
+            if (fw == vw || vw->isAncestorOf(fw))
+                return true;
+        }
+    }
+
+    // Someone else is typing: Python console, spin box, combo, text editor.
+    if (fw->inherits("QLineEdit") || fw->inherits("QAbstractSpinBox") ||
+        fw->inherits("QTextEdit") || fw->inherits("QPlainTextEdit") ||
+        fw->inherits("QComboBox"))
+        return false;
+
+    // A non-text widget of the main window (tree, viewport chrome): the session
+    // is active, so the few keys we own are still ours.
+    return fw->window() == Gui::getMainWindow();
 }
 
 bool AxisFlowEventFilter::claims(const QKeyEvent* ke) const
@@ -74,7 +101,23 @@ bool AxisFlowEventFilter::claims(const QKeyEvent* ke) const
     if (AxisFlowService::instance().actionForKey(ke->key()) != AxisAction::None)
         return true;
 
-    return _ownsInput && isValueChar(ke);
+    if (!_ownsInput)
+        return false;
+
+    // Editing keys must be claimed too: with focus back in the 3-D view (which
+    // happens as soon as the mouse moves) they would otherwise be lost, and
+    // Backspace would silently do nothing.
+    switch (ke->key()) {
+    case Qt::Key_Backspace:
+    case Qt::Key_Delete:
+    case Qt::Key_Tab:
+    case Qt::Key_Backtab:
+        return true;
+    default:
+        break;
+    }
+
+    return isValueChar(ke);
 }
 
 // ---------------------------------------------------------------------------
@@ -88,9 +131,7 @@ bool AxisFlowEventFilter::eventFilter(QObject* watched, QEvent* ev)
     if (!AxisFlowService::instance().isActive())
         return QObject::eventFilter(watched, ev);
 
-    // Only while the 3-D view holds focus. With focus in the panel, its own
-    // widgets handle typing and its event filter handles the action keys.
-    if (!focusInView())
+    if (!inScope())
         return QObject::eventFilter(watched, ev);
 
     auto* ke = static_cast<QKeyEvent*>(ev);
@@ -115,10 +156,17 @@ bool AxisFlowEventFilter::eventFilter(QObject* watched, QEvent* ev)
         return true;
     }
 
-    // "Just start typing": seed the panel's primary field. Focus moves there, so
-    // the rest of the number is typed normally and never reaches this filter.
-    if (_ownsInput && isValueChar(ke)) {
-        if (AxisFlowPanel::instance()->startTyping(ke->text().at(0)))
+    if (_ownsInput) {
+        AxisFlowPanel* panel = AxisFlowPanel::instance();
+
+        if (ke->key() == Qt::Key_Backspace) { panel->backspaceEntry(); return true; }
+        if (ke->key() == Qt::Key_Delete)    { panel->clearEntry();     return true; }
+        if (ke->key() == Qt::Key_Tab ||
+            ke->key() == Qt::Key_Backtab)   { panel->cycleActiveField(); return true; }
+
+        // "Just start typing": seed the panel's primary field. The panel window
+        // is activated, so the caret shows and the rest is typed natively.
+        if (isValueChar(ke) && panel->startTyping(ke->text().at(0)))
             return true;
     }
 

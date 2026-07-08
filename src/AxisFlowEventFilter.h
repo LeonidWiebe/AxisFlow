@@ -48,8 +48,17 @@ protected:
     bool eventFilter(QObject* watched, QEvent* ev) override;
 
 private:
-    /** Keyboard focus is inside our 3-D view. */
-    bool focusInView() const;
+    /**
+     * Whether AxisFlow may claim keys right now.
+     *
+     * Not simply "focus is in the 3-D view": focus is often nowhere at all (we
+     * clear it when an entry ends, and Qt leaves it null after a dialog closes).
+     * With a null focus widget the key would fall through to FreeCAD's global
+     * shortcuts, so a digit becomes Std_ViewTop mid-typing. Anything that is a
+     * real text input elsewhere -- the Python console, a spin box, a modal
+     * dialog -- keeps its keys.
+     */
+    bool inScope() const;
     /** A printable character that starts a numeric entry. */
     static bool isValueChar(const QKeyEvent* ke);
     /** This key is one we intend to consume (action, or value char if we own input). */

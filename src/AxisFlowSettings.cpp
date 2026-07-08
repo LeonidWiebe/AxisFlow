@@ -21,6 +21,7 @@ constexpr double kDefAxisStartPct  = 0.15;
 constexpr double kDefAxisLengthPct = 0.70;
 constexpr unsigned long kDefColorX = 0xFF0000FFul;   // red
 constexpr unsigned long kDefColorY = 0x00FF00FFul;   // green
+constexpr unsigned long kDefActiveField = 0xDCDCDCFFul;   // a touch darker than a plain field
 constexpr double kDefFillTransp    = 0.65;
 constexpr bool   kDefAlwaysShow    = false;
 
@@ -60,6 +61,7 @@ void AxisFlowSettings::load()
     _axisLengthPct    = clamp01(g->GetFloat("AxisLengthPct", kDefAxisLengthPct));
     _axisColorX       = g->GetUnsigned("AxisColorX", kDefColorX);
     _axisColorY       = g->GetUnsigned("AxisColorY", kDefColorY);
+    _activeFieldColor = g->GetUnsigned("ActiveFieldColor", kDefActiveField);
     _fillTransparency = clamp01(g->GetFloat("FillTransparency", kDefFillTransp));
     _alwaysShowCompass = g->GetBool("AlwaysShowCompass", kDefAlwaysShow);
 
@@ -81,6 +83,7 @@ void AxisFlowSettings::save()
     g->SetFloat("AxisLengthPct", _axisLengthPct);
     g->SetUnsigned("AxisColorX", _axisColorX);
     g->SetUnsigned("AxisColorY", _axisColorY);
+    g->SetUnsigned("ActiveFieldColor", _activeFieldColor);
     g->SetFloat("FillTransparency", _fillTransparency);
     g->SetBool("AlwaysShowCompass", _alwaysShowCompass);
 }
@@ -93,6 +96,7 @@ void AxisFlowSettings::resetDefaults()
     _axisLengthPct     = kDefAxisLengthPct;
     _axisColorX        = kDefColorX;
     _axisColorY        = kDefColorY;
+    _activeFieldColor  = kDefActiveField;
     _fillTransparency  = kDefFillTransp;
     _alwaysShowCompass = kDefAlwaysShow;
     save();
@@ -159,6 +163,14 @@ void AxisFlowSettings::setAxisColorY(unsigned long rgba)
     if (rgba == _axisColorY) return;
     _axisColorY = rgba;
     group()->SetUnsigned("AxisColorY", rgba);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setActiveFieldColor(unsigned long rgba)
+{
+    if (rgba == _activeFieldColor) return;
+    _activeFieldColor = rgba;
+    group()->SetUnsigned("ActiveFieldColor", rgba);
     Q_EMIT changed();
 }
 

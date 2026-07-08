@@ -56,11 +56,14 @@ public:
     // ---- colours / fill ---------------------------------------------------
     unsigned long axisColorX() const { return _axisColorX; }   // 0xRRGGBBAA
     unsigned long axisColorY() const { return _axisColorY; }
+    /** Background of the coordinate field that is currently active. */
+    unsigned long activeFieldColor() const { return _activeFieldColor; }
     /** 0 = opaque fill, 1 = fully transparent. */
     double fillTransparency()  const { return _fillTransparency; }
 
     void setAxisColorX(unsigned long rgba);
     void setAxisColorY(unsigned long rgba);
+    void setActiveFieldColor(unsigned long rgba);
     void setFillTransparency(double v);
 
     /** Unpack a packed 0xRRGGBBAA colour into 0..1 floats. */
@@ -97,6 +100,7 @@ private:
     double        _axisLengthPct     { 0.70 };
     unsigned long _axisColorX        { 0xFF0000FFul };   // red
     unsigned long _axisColorY        { 0x00FF00FFul };   // green
+    unsigned long _activeFieldColor  { 0xDCDCDCFFul };   // slightly darker field
     double        _fillTransparency  { 0.65 };
     bool          _alwaysShowCompass { false };
 };

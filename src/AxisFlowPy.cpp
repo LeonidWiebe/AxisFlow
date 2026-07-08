@@ -329,6 +329,7 @@ PyObject* axisflow_getSettings(PyObject*, PyObject*)
     setItem("axisLengthPct",    PyFloat_FromDouble(s.axisLengthPct()));
     setItem("axisColorX",       PyLong_FromUnsignedLong(s.axisColorX()));
     setItem("axisColorY",       PyLong_FromUnsignedLong(s.axisColorY()));
+    setItem("activeFieldColor", PyLong_FromUnsignedLong(s.activeFieldColor()));
     setItem("fillTransparency", PyFloat_FromDouble(s.fillTransparency()));
     setItem("alwaysShowCompass", PyBool_FromLong(s.alwaysShowCompass() ? 1 : 0));
 
@@ -369,6 +370,7 @@ PyObject* axisflow_setSetting(PyObject*, PyObject* args)
     else if (k == "axisLengthPct")     s.setAxisLengthPct(PyFloat_AsDouble(val));
     else if (k == "axisColorX")        s.setAxisColorX(PyLong_AsUnsignedLong(val));
     else if (k == "axisColorY")        s.setAxisColorY(PyLong_AsUnsignedLong(val));
+    else if (k == "activeFieldColor")  s.setActiveFieldColor(PyLong_AsUnsignedLong(val));
     else if (k == "fillTransparency")  s.setFillTransparency(PyFloat_AsDouble(val));
     else if (k == "alwaysShowCompass") s.setAlwaysShowCompass(PyObject_IsTrue(val) == 1);
     else {
@@ -480,7 +482,8 @@ PyMethodDef AxisFlowMethods[] = {
      "getSettings() -> dict. All persistent options plus the 'hotkeys' map."},
     {"setSetting",     axisflow_setSetting,     METH_VARARGS,
      "setSetting(name, value). name in {compassSize, axisThickness, axisStartPct, "
-     "axisLengthPct, axisColorX, axisColorY, fillTransparency, alwaysShowCompass}."},
+     "axisLengthPct, axisColorX, axisColorY, activeFieldColor, fillTransparency, "
+     "alwaysShowCompass}."},
     {"resetSettings",  axisflow_resetSettings,  METH_NOARGS,
      "resetSettings(). Restore built-in defaults (options and hotkeys)."},
     {"loadHotkeysFromSettings", axisflow_loadHotkeysFromSettings, METH_NOARGS,

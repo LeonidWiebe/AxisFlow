@@ -2,6 +2,7 @@
 
 #include "AxisFlowPanel.h"
 #include "AxisFlowService.h"
+#include "AxisFlowSettings.h"
 #include "AxisFlowHotkeys.h"
 
 #include <Gui/MainWindow.h>
@@ -11,7 +12,9 @@
 
 #include <QtCore/QCoreApplication>
 #include <QtCore/QEvent>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QSignalBlocker>
+#include <QtGui/QRegularExpressionValidator>
 #include <QtGui/QCloseEvent>
 #include <QtGui/QFont>
 #include <QtGui/QMouseEvent>
@@ -86,13 +89,15 @@ void AxisFlowPanel::buildUi()
 
     _modeBtn = new QPushButton(QStringLiteral("Rect"));
 
-    // Variant A: the fields are a live read-out of the constrained point, fed by
-    // cursorMoved. Numeric entry is Draft's job, so the fields are read-only and
-    // never take keyboard focus (nothing here competes with Draft's inputs).
+    // AxisFlow owns the input in its own tools, so the fields are editable.
+    // Digits, separators and a sign only: letters are reserved for the action
+    // keys (X/Y/Z lock), and the validator also blocks them arriving by paste.
+    auto* numeric = new QRegularExpressionValidator(
+        QRegularExpression(QStringLiteral("[0-9.,+\\-]*")), this);
+
     for (QLineEdit* e : {_editA, _editB, _editC}) {
-        e->setReadOnly(true);
-        e->setFocusPolicy(Qt::NoFocus);
         e->setPlaceholderText(QString(QChar(0x2014)));   // em dash, encoding-safe
+        e->setValidator(numeric);
     }
 
     mainLayout->addLayout(rowA);
@@ -135,12 +140,15 @@ void AxisFlowPanel::wireToService()
     });
 
     // Typed values become live keyboard overrides on the solver.
-    connect(_editA, &QLineEdit::textEdited, this,
-            [this](const QString& t){ pushFieldValue(0, t); });
-    connect(_editB, &QLineEdit::textEdited, this,
-            [this](const QString& t){ pushFieldValue(1, t); });
-    connect(_editC, &QLineEdit::textEdited, this,
-            [this](const QString& t){ pushFieldValue(2, t); });
+    auto onEdited = [this](int idx) {
+        return [this, idx](const QString& t) {
+            _entryField = t.isEmpty() ? -1 : idx;
+            pushFieldValue(idx, t);
+        };
+    };
+    connect(_editA, &QLineEdit::textEdited, this, onEdited(0));
+    connect(_editB, &QLineEdit::textEdited, this, onEdited(1));
+    connect(_editC, &QLineEdit::textEdited, this, onEdited(2));
 
     // Enter runs whatever the keymap binds to Return (smart lock by default).
     auto onReturn = []() {
@@ -157,7 +165,12 @@ void AxisFlowPanel::wireToService()
     _editB->installEventFilter(this);
     _editC->installEventFilter(this);
 
+    // The highlight colour is a setting, so follow it live.
+    connect(&AxisFlowSettings::instance(), &AxisFlowSettings::changed,
+            this, [this]{ refreshActiveHighlight(); });
+
     // Initial sync.
+    refreshActiveHighlight();
     onServiceState();
 }
 
@@ -169,16 +182,24 @@ void AxisFlowPanel::setValues(double x, double y, double z)
     // read-out: the 3-D view takes focus back as soon as the mouse moves, so
     // hasFocus() alone is not enough to protect what the user is typing.
     const AxisFlowService& s = AxisFlowService::instance();
-    if (!s.hasKeyValue(0) && !_editA->hasFocus()) _editA->setText(QString::number(x, 'f', 4));
-    if (!s.hasKeyValue(1) && !_editB->hasFocus()) _editB->setText(QString::number(y, 'f', 4));
-    if (!s.hasKeyValue(2) && !_editC->hasFocus()) _editC->setText(QString::number(z, 'f', 4));
+    auto held = [&](int i, QLineEdit* e) {
+        // Held while it carries an override, while it is being typed into (even
+        // if the text does not parse yet, e.g. a lone "-"), or while focused.
+        return s.hasKeyValue(i) || i == _entryField || e->hasFocus();
+    };
+    if (!held(0, _editA)) _editA->setText(QString::number(x, 'f', 4));
+    if (!held(1, _editB)) _editB->setText(QString::number(y, 'f', 4));
+    if (!held(2, _editC)) _editC->setText(QString::number(z, 'f', 4));
 }
 
 void AxisFlowPanel::setValuesDist(double dist, double angle)
 {
     const AxisFlowService& s = AxisFlowService::instance();
-    if (!s.hasKeyValue(0) && !_editA->hasFocus()) _editA->setText(QString::number(dist, 'f', 4));
-    if (!s.hasKeyValue(1) && !_editB->hasFocus()) _editB->setText(QString::number(angle, 'f', 2));
+    auto held = [&](int i, QLineEdit* e) {
+        return s.hasKeyValue(i) || i == _entryField || e->hasFocus();
+    };
+    if (!held(0, _editA)) _editA->setText(QString::number(dist, 'f', 4));
+    if (!held(1, _editB)) _editB->setText(QString::number(angle, 'f', 2));
 }
 
 void AxisFlowPanel::setMode(bool polar)
@@ -196,6 +217,9 @@ void AxisFlowPanel::setMode(bool polar)
         _editC->setVisible(true); _labelC->setVisible(true); _lockC->setVisible(true);
         _modeBtn->setText(QLatin1String("Rect"));
     }
+    // Z disappears in polar: the active field must stay within range.
+    setActiveField(_activeField);
+    refreshActiveHighlight();
     adjustSize();
 }
 
@@ -223,12 +247,15 @@ void AxisFlowPanel::focusField(int index)
 
 double AxisFlowPanel::parseQuantity(const QString& text)
 {
-    const QString t = text.trimmed();
+    QString t = text.trimmed();
     if (t.isEmpty())
         return std::numeric_limits<double>::quiet_NaN();
 
-    // Base::Quantity understands units and both decimal separators, so "1500",
-    // "1,5 m" and "2 ft" all work. A bare number keeps the document's unit.
+    // The field allows a comma as decimal separator; the parser wants a dot.
+    t.replace(QLatin1Char(','), QLatin1Char('.'));
+
+    // Base::Quantity is kept (rather than toDouble) so a unit suffix keeps
+    // working if letters are ever allowed back into the field.
     try {
         Base::Quantity q = Base::Quantity::parse(t.toStdString());
         return q.getValue();
@@ -258,23 +285,153 @@ void AxisFlowPanel::pushFieldValue(int index, const QString& text)
     // until it becomes valid; nothing is reset under the user's fingers.
 }
 
+void AxisFlowPanel::setActiveField(int index)
+{
+    const int maxField = _polar ? 1 : 2;   // polar has no Z row
+    if (index < 0) index = 0;
+    if (index > maxField) index = maxField;
+    if (index == _activeField) return;
+
+    _activeField = index;
+    refreshActiveHighlight();
+    focusActiveField();     // the caret follows the active field
+}
+
+void AxisFlowPanel::focusActiveField()
+{
+    QLineEdit* edits[3] = { _editA, _editB, _editC };
+    QLineEdit* target = edits[_activeField];
+    if (!target || !target->isVisible())
+        return;
+
+    // A widget in an inactive window shows no caret and receives no keys, so the
+    // panel window has to be the active one while AxisFlow is taking input.
+    if (!isActiveWindow()) {
+        raise();
+        activateWindow();
+    }
+    if (!target->hasFocus())
+        target->setFocus(Qt::OtherFocusReason);
+}
+
+void AxisFlowPanel::cycleActiveField()
+{
+    const int count = _polar ? 2 : 3;
+    setActiveField((_activeField + 1) % count);
+}
+
+void AxisFlowPanel::updateActiveFieldFromCursor()
+{
+    // Frozen while the user is typing: the entry must not jump to another field
+    // because the cursor drifted past the diagonal.
+    if (_entryField >= 0)
+        return;
+
+    // Polar has no meaningful "nearest axis": distance stays the default target.
+    if (_polar)
+        return;
+
+    switch (AxisFlowService::instance().nearestAxis()) {
+    case AxisLock::X: setActiveField(0); break;
+    case AxisLock::Y: setActiveField(1); break;
+    case AxisLock::Z: setActiveField(2); break;
+    default: break;
+    }
+}
+
+void AxisFlowPanel::refreshActiveHighlight()
+{
+    const unsigned long rgba = AxisFlowSettings::instance().activeFieldColor();
+    float r, g, b, a;
+    AxisFlowSettings::unpackColor(rgba, r, g, b, a);
+
+    const QString css = QStringLiteral("QLineEdit { background-color: rgba(%1,%2,%3,%4); }")
+        .arg(int(r * 255.0f)).arg(int(g * 255.0f))
+        .arg(int(b * 255.0f)).arg(QString::number(a, 'f', 3));
+
+    QLineEdit* edits[3] = { _editA, _editB, _editC };
+    for (int i = 0; i < 3; ++i)
+        edits[i]->setStyleSheet(i == _activeField ? css : QString());
+}
+
+QLineEdit* AxisFlowPanel::entryEdit()
+{
+    switch (_entryField) {
+    case 1:  return _editB;
+    case 2:  return _editC;
+    default: return _editA;   // X (ortho) or Distance (radial)
+    }
+}
+
 bool AxisFlowPanel::startTyping(QChar ch)
 {
-    QLineEdit* target = _editA;   // X (ortho) or Distance (radial)
+    // The first character lands in whichever field is active; from then on the
+    // entry (and therefore the active field) is frozen.
+    const int idx = (_entryField >= 0) ? _entryField : _activeField;
+    QLineEdit* edits[3] = { _editA, _editB, _editC };
+    QLineEdit* target = edits[idx];
     if (!target || !target->isVisible())
         return false;
 
-    // Continue an entry already in progress instead of restarting it. Moving the
-    // mouse hands focus back to the 3-D view, so the next digit arrives here
-    // rather than in the field -- without this, "1500" would end up as "0".
-    const bool continuing = AxisFlowService::instance().hasKeyValue(0);
+    // Continue an entry already in progress instead of restarting it: the 3-D
+    // view can take focus back between keystrokes, so the next digit arrives
+    // here rather than in the field -- without this, "1500" would become "0".
+    const bool continuing = (_entryField == idx) && !target->text().isEmpty();
     const QString text = continuing ? (target->text() + ch) : QString(ch);
 
-    target->setFocus(Qt::OtherFocusReason);
+    _entryField = idx;
+
+    // A widget inside an INACTIVE window gets no keyboard focus: no caret, and
+    // Backspace never reaches it. Activate the panel so the entry behaves like a
+    // normal text field from the second character on.
+    if (!target->hasFocus()) {
+        window()->raise();
+        window()->activateWindow();
+        target->setFocus(Qt::OtherFocusReason);
+    }
+
     target->setText(text);
     target->setCursorPosition(int(text.length()));
-    pushFieldValue(0, text);
+    pushFieldValue(idx, text);
     return true;
+}
+
+bool AxisFlowPanel::backspaceEntry()
+{
+    if (_entryField < 0) return false;
+
+    const int idx = _entryField;          // capture before the entry may end
+    QLineEdit* target = entryEdit();
+    QString text = target->text();
+    if (text.isEmpty()) { _entryField = -1; return false; }
+
+    text.chop(1);
+    target->setText(text);
+    target->setCursorPosition(int(text.length()));
+
+    if (text.isEmpty())
+        _entryField = -1;          // entry abandoned: the read-out takes over
+    pushFieldValue(idx, text);     // empty text releases that field's override
+    return true;
+}
+
+bool AxisFlowPanel::clearEntry()
+{
+    if (_entryField < 0) return false;
+    const int idx = _entryField;
+    entryEdit()->clear();
+    _entryField = -1;
+    pushFieldValue(idx, QString());
+    return true;
+}
+
+bool AxisFlowPanel::isEntryStartKey(const QKeyEvent* ke)
+{
+    const QString t = ke->text();
+    if (t.isEmpty()) return false;
+    const QChar c = t.at(0);
+    return c.isDigit() || c == QLatin1Char('.') || c == QLatin1Char(',')
+                       || c == QLatin1Char('-') || c == QLatin1Char('+');
 }
 
 bool AxisFlowPanel::isValueKey(const QKeyEvent* ke)
@@ -322,28 +479,43 @@ bool AxisFlowPanel::eventFilter(QObject* obj, QEvent* ev)
     if (ev->type() == QEvent::KeyPress &&
         (obj == _editA || obj == _editB || obj == _editC)) {
         auto* ke = static_cast<QKeyEvent*>(ev);
-        auto* edit = static_cast<QLineEdit*>(obj);
+
+        if (ke->key() == Qt::Key_Tab || ke->key() == Qt::Key_Backtab) {
+            cycleActiveField();
+            return true;   // never let Qt walk the focus chain
+        }
+
+        // The caret lives in the active field, which shows the live read-out.
+        // The FIRST typed character must therefore replace that read-out, not be
+        // appended to it: "1500" typed over "1234.5678" must not become
+        // "1234.56781500".
+        if (_entryField < 0 && isEntryStartKey(ke)) {
+            QLineEdit* edit = qobject_cast<QLineEdit*>(obj);
+            const int idx = (edit == _editB) ? 1 : (edit == _editC ? 2 : 0);
+            _entryField = idx;
+            edit->clear();
+            return QWidget::eventFilter(obj, ev);   // let QLineEdit insert it
+        }
 
         if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter ||
-            ke->key() == Qt::Key_Tab    || isValueKey(ke))
+            isValueKey(ke))
             return QWidget::eventFilter(obj, ev);
 
-        // Characters that can legitimately appear inside a quantity ("1500 mm",
-        // "1,5 m", "45 deg") must be typed, not interpreted -- but only once the
-        // field has content. Escape, Insert and friends are never typable, so
-        // they always run their action, even mid-entry.
-        const QString kt = ke->text();
-        const bool typable = !kt.isEmpty() &&
-                             (kt.at(0).isLetterOrNumber() ||
-                              QStringLiteral(" .,-+/^").contains(kt.at(0)));
-
+        // Bound keys always act, even mid-entry: after typing "1500" the X key
+        // must still lock the X axis. Letters cannot be typed into the field
+        // anyway (validator), so there is no ambiguity with unit suffixes.
         AxisFlowService& s = AxisFlowService::instance();
         AxisAction a = s.actionForKey(ke->key());
-        if (a != AxisAction::None &&
-            (!typable || edit->text().trimmed().isEmpty())) {
+        if (a != AxisAction::None) {
             s.performAction(a);
             return true;
         }
+
+        // Any other letter is meaningless in a coordinate: swallow it rather
+        // than let it flash in the field and be rejected.
+        const QString kt = ke->text();
+        if (!kt.isEmpty() && kt.at(0).isLetter())
+            return true;
     }
 
     return QWidget::eventFilter(obj, ev);
@@ -361,9 +533,7 @@ void AxisFlowPanel::closeEvent(QCloseEvent* e)
 void AxisFlowPanel::keyPressEvent(QKeyEvent* e)
 {
     if (e->key() == Qt::Key_Tab) {
-        if (_editA->hasFocus())      { focusField(1); }
-        else if (_editB->hasFocus()) { focusField(_polar ? 0 : 2); }
-        else                         { focusField(0); }
+        cycleActiveField();
         return;
     }
 
@@ -397,14 +567,19 @@ void AxisFlowPanel::onServiceState()
     // back: while an edit keeps focus, setValues() deliberately will not touch
     // it, so the stale typed text would otherwise linger.
     if (!s.hasKeyValue(0) && !s.hasKeyValue(1) && !s.hasKeyValue(2)) {
-        for (QLineEdit* e : {_editA, _editB, _editC}) {
-            if (e->hasFocus()) e->clearFocus();
-        }
+        _entryField = -1;
+        // Never drop the caret: a panel with no focused widget sends the next
+        // digit straight into FreeCAD's global shortcuts.
+        focusActiveField();
     }
 }
 
 void AxisFlowPanel::onCursorMoved(Base::Vector3d /*solved*/)
 {
+    // The active field follows the axis the cursor leans towards (frozen while
+    // typing -- see updateActiveFieldFromCursor).
+    updateActiveFieldFromCursor();
+
     AxisFlowService& s = AxisFlowService::instance();
     if (s.mode() == CompassMode::Polar) {
         setValuesDist(s.distance(), s.angleDeg());
