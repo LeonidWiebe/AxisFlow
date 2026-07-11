@@ -165,14 +165,14 @@ void AxisFlowCompass::build()
     _guideSep = new SoSeparator;
     _colorGuide = new SoBaseColor;
     _colorGuide->rgb.setValue(kGuideColor);
-    auto* guideStyle = new SoDrawStyle;
-    guideStyle->lineWidth.setValue(1.0f);
-    guideStyle->linePattern.setValue(0xF0F0);   // dashed
+    _styleGuide = new SoDrawStyle;
+    _styleGuide->lineWidth.setValue(1.0f);
+    _styleGuide->linePattern.setValue(0xF0F0);   // dashed (overridden by settings)
     _coordGuide = new SoCoordinate3;
     _lineGuide = new SoLineSet;
     _lineGuide->numVertices.setValue(2);
     _guideSep->addChild(_colorGuide);
-    _guideSep->addChild(guideStyle);
+    _guideSep->addChild(_styleGuide);
     _guideSep->addChild(_coordGuide);
     _guideSep->addChild(_lineGuide);
     content->addChild(_guideSep);
@@ -196,6 +196,9 @@ void AxisFlowCompass::applySettings()
     const float transp = static_cast<float>(s.fillTransparency());
     _fillSq->transparency.setValue(transp);
     _fillCi->transparency.setValue(transp);
+
+    // Live guide line: on/off, dash style, colour.
+    applyGuideStyle(s.liveLineEnabled(), s.liveLineStyle(), s.liveLineColor());
 
     rebuild();   // axis start/length fractions may have changed too
 }
@@ -250,6 +253,11 @@ void AxisFlowCompass::rebuild()
 
 void AxisFlowCompass::rebuildGuide()
 {
+    if (!_guideEnabled) {
+        _lineGuide->numVertices.setValue(0);   // hidden
+        return;
+    }
+
     // The subgraph is positioned AND rotated by _transform, so the guide must be
     // expressed in compass-local coordinates: project the world delta onto the
     // plane basis (orthonormal, so a dot product is the inverse transform).
@@ -259,6 +267,26 @@ void AxisFlowCompass::rebuildGuide()
     const SbVec3f pts[2] = { SbVec3f(0, 0, 0), local };
     _coordGuide->point.setValues(0, 2, pts);
     _coordGuide->point.setNum(2);
+    _lineGuide->numVertices.setValue(2);
+}
+
+void AxisFlowCompass::applyGuideStyle(bool enabled, int style, unsigned long rgba)
+{
+    _guideEnabled = enabled;
+
+    if (_colorGuide) {
+        const float r = static_cast<float>((rgba >> 24) & 0xFF) / 255.0f;
+        const float g = static_cast<float>((rgba >> 16) & 0xFF) / 255.0f;
+        const float b = static_cast<float>((rgba >>  8) & 0xFF) / 255.0f;
+        _colorGuide->rgb.setValue(r, g, b);
+    }
+    if (_styleGuide) {
+        // solid, dashed, dotted, dash-dot
+        static const unsigned short kPat[4] = { 0xFFFF, 0xF0F0, 0xAAAA, 0xFF18 };
+        const int idx = (style < 0 || style > 3) ? 1 : style;
+        _styleGuide->linePattern.setValue(kPat[idx]);
+    }
+    rebuildGuide();
 }
 
 // ---------------------------------------------------------------------------

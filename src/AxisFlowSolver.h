@@ -71,6 +71,13 @@ public:
     bool hasValueDist() const;
     bool hasValueAngle() const;
 
+    /** The override value (NaN when unset). */
+    double getValueX() const;
+    double getValueY() const;
+    double getValueZ() const;
+    double getValueDist() const;
+    double getValueAngle() const;
+
     /** Release a single override, leaving the others in place. */
     void clearValueX();
     void clearValueY();

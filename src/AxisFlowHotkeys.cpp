@@ -22,12 +22,17 @@ void Hotkeys::setDefaults()
     // setHotkey(code, 'none') at install time.
     _map[Qt::Key_Insert] = AxisAction::ToggleActive;
     _map[Qt::Key_Space]  = AxisAction::ToggleMode;   // ortho <-> radial
-    _map[Qt::Key_Return] = AxisAction::SmartLock;
-    _map[Qt::Key_Enter]  = AxisAction::SmartLock;    // numpad
+    _map[Qt::Key_Return] = AxisAction::ConfirmPoint; // Enter places the point
+    _map[Qt::Key_Enter]  = AxisAction::ConfirmPoint; // numpad Enter
+    // SmartLock keeps no default key (Enter now commits); bind via setHotkey.
     _map[Qt::Key_X]      = AxisAction::LockX;
     _map[Qt::Key_Y]      = AxisAction::LockY;
     _map[Qt::Key_Z]      = AxisAction::LockZ;
-    _map[Qt::Key_Escape] = AxisAction::ClearLocks;
+    _map[Qt::Key_Escape]   = AxisAction::FinishLine;     // finish the current line, keep going
+    _map[Qt::Key_QuoteLeft] = AxisAction::CancelCommand; // backtick ` ends the whole command
+    // CancelEntry / ClearLocks stay available (API) but have no default key now:
+    // clear a typed value with Backspace/Delete, drop an axis lock by pressing
+    // its key again. Escape is reserved for "finish this polyline".
 }
 
 void Hotkeys::set(int qtKey, AxisAction a)
@@ -103,6 +108,10 @@ const char* Hotkeys::name(AxisAction a)
     case AxisAction::LockY:        return "LockY";
     case AxisAction::LockZ:        return "LockZ";
     case AxisAction::ClearLocks:   return "ClearLocks";
+    case AxisAction::CancelEntry:  return "CancelEntry";
+    case AxisAction::CancelCommand:return "CancelCommand";
+    case AxisAction::FinishLine:   return "FinishLine";
+    case AxisAction::ConfirmPoint: return "ConfirmPoint";
     default:                       return "None";
     }
 }
@@ -126,6 +135,10 @@ const std::vector<AxisAction>& Hotkeys::allActions()
         AxisAction::LockY,
         AxisAction::LockZ,
         AxisAction::ClearLocks,
+        AxisAction::CancelEntry,
+        AxisAction::CancelCommand,
+        AxisAction::FinishLine,
+        AxisAction::ConfirmPoint,
     };
     return v;
 }

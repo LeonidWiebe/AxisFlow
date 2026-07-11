@@ -13,6 +13,7 @@
 #include <Gui/View3DInventor.h>
 
 #include "AxisFlowTool.h"
+#include "AxisFlowSettings.h"
 
 // ---------------------------------------------------------------------------
 // DEF_STD_CMD_A creates a command with isActive() override
@@ -40,6 +41,7 @@ CmdAxisFlowActivate::CmdAxisFlowActivate()
     sToolTipText = "Toggle the AxisFlow coordinate input compass";
     sWhatsThis   = "AxisFlow_Activate";
     sStatusTip   = sToolTipText;
+    sPixmap      = "AxisFlow_Activate";
     sAccel       = "A, D";
 }
 
@@ -72,8 +74,84 @@ bool CmdAxisFlowActivate::isActive()
 
 // ---------------------------------------------------------------------------
 
+class CmdAxisFlowToggleLiveLine : public Gui::Command
+{
+public:
+    CmdAxisFlowToggleLiveLine();
+    const char* className() const override { return "CmdAxisFlowToggleLiveLine"; }
+protected:
+    void activated(int iMsg) override;
+    bool isActive() override;
+};
+
+CmdAxisFlowToggleLiveLine::CmdAxisFlowToggleLiveLine()
+    : Gui::Command("AxisFlow_ToggleLiveLine")
+{
+    sAppModule   = "AxisFlow";
+    sGroup       = "AxisFlow";
+    sMenuText    = "Toggle live line";
+    sToolTipText = "Show or hide the live guide line from the compass centre to the cursor";
+    sWhatsThis   = "AxisFlow_ToggleLiveLine";
+    sStatusTip   = sToolTipText;
+    sPixmap      = "AxisFlow_ToggleLiveLine";
+}
+
+void CmdAxisFlowToggleLiveLine::activated(int)
+{
+    auto& s = AxisFlowGui::AxisFlowSettings::instance();
+    s.setLiveLineEnabled(!s.liveLineEnabled());   // persisted; compass redraws via changed()
+}
+
+bool CmdAxisFlowToggleLiveLine::isActive()
+{
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+
+// Draws a polyline through AxisFlow's public getPoint() API. The geometry and
+// preview live in axisflow_demo.py (the reference consumer, outside the core);
+// this command is just a toolbar entry point to it.
+class CmdAxisFlowDrawLine : public Gui::Command
+{
+public:
+    CmdAxisFlowDrawLine();
+    const char* className() const override { return "CmdAxisFlowDrawLine"; }
+protected:
+    void activated(int iMsg) override;
+    bool isActive() override;
+};
+
+CmdAxisFlowDrawLine::CmdAxisFlowDrawLine()
+    : Gui::Command("AxisFlow_DrawLine")
+{
+    sAppModule   = "AxisFlow";
+    sGroup       = "AxisFlow";
+    sMenuText    = "Draw line";
+    sToolTipText = "Draw a polyline using the AxisFlow compass (Escape starts a "
+                   "new line, backtick ends the command)";
+    sWhatsThis   = "AxisFlow_DrawLine";
+    sStatusTip   = sToolTipText;
+    sPixmap      = "AxisFlow_DrawLine";
+}
+
+void CmdAxisFlowDrawLine::activated(int)
+{
+    doCommand(Gui::Command::Gui,
+              "import axisflow_demo\naxisflow_demo.line()");
+}
+
+bool CmdAxisFlowDrawLine::isActive()
+{
+    return Gui::Application::Instance->activeDocument() != nullptr;
+}
+
+// ---------------------------------------------------------------------------
+
 void CreateAxisFlowCommands()
 {
     Gui::CommandManager& mgr = Gui::Application::Instance->commandManager();
     mgr.addCommand(new CmdAxisFlowActivate());
+    mgr.addCommand(new CmdAxisFlowDrawLine());
+    mgr.addCommand(new CmdAxisFlowToggleLiveLine());
 }

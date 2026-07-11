@@ -3,6 +3,8 @@
 #include "AxisFlowService.h"
 #include "AxisFlowSettings.h"
 
+#include <limits>
+
 namespace AxisFlowGui {
 
 // ---------------------------------------------------------------------------
@@ -124,6 +126,12 @@ void AxisFlowService::performAction(AxisAction a)
     // Escape is the single "let go" key: it releases the axis lock AND every
     // typed override, so the fields start following the cursor again.
     case AxisAction::ClearLocks: clearLocks(); clearKeyValues(); break;
+    // CancelEntry is normally intercepted by the panel (it owns entry state).
+    // Reaching here means no panel context, so fall back to the second layer.
+    case AxisAction::CancelEntry: clearKeyValues(); clearLocks(); break;
+    case AxisAction::CancelCommand: Q_EMIT cancelRequested(); break;
+    case AxisAction::FinishLine:    Q_EMIT finishRequested(); break;
+    case AxisAction::ConfirmPoint:  Q_EMIT confirmRequested(); break;
     default: break;
     }
 
@@ -257,6 +265,27 @@ bool AxisFlowService::hasKeyValue(int field) const
     case 2: return _solver.hasValueZ();
     default: return false;
     }
+}
+
+double AxisFlowService::keyValue(int field) const
+{
+    if (_solver.getMode() == CompassMode::Rectangular) {
+        switch (field) {
+        case 0: return _solver.getValueX();
+        case 1: return _solver.getValueY();
+        case 2: return _solver.getValueZ();
+        default: break;
+        }
+    }
+    else {
+        switch (field) {
+        case 0: return _solver.getValueDist();
+        case 1: return _solver.getValueAngle();
+        case 2: return _solver.getValueZ();
+        default: break;
+        }
+    }
+    return std::numeric_limits<double>::quiet_NaN();
 }
 
 void AxisFlowService::refreshCursor()

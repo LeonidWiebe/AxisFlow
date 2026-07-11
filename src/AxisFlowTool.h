@@ -48,6 +48,34 @@ public:
     /** Diagnostics: the live compass (may be null before activate()). */
     AxisFlowCompass* compass() const { return _compass; }
 
+    /**
+     * Input state machine for AxisFlow's own tool.
+     *
+     *   Idle       - session up, no base point yet; the compass sits at the WP
+     *                origin and the first click sets the anchor.
+     *   Tracking   - a base point exists; the cursor drives a live point and a
+     *                click confirms the next one (this is where entry happens).
+     *   Finished   - the command ended (Cancel key, or a consumer stopped it).
+     *
+     * Escape is layered, per the agreed behaviour: it first cancels an active
+     * value entry, then releases locks; it does NOT end the command (a separate
+     * Cancel key does).
+     */
+    enum class InputState { Idle, Tracking, Finished };
+    InputState inputState() const { return _state; }
+
+    /** Begin a fresh point sequence (Idle). Optional continue-mode keeps the
+     *  tool tracking after each confirmed point instead of finishing. */
+    void beginInput(bool continueMode = true);
+    /** True while the tool is collecting points. */
+    bool isCollecting() const { return _state != InputState::Finished; }
+    /** Stop collecting without clearing state (used when getPoint ends). */
+    void stopCollecting() { _state = InputState::Finished; }
+    /** Seed the base point (compass origin) without emitting pointConfirmed. */
+    void setBasePoint(const Base::Vector3d& world);
+    /** True in AxisFlow's own tool (owns keyboard); false in the Draft adapter. */
+    bool hasPositionSource() const { return _hasPositionSource; }
+
 Q_SIGNALS:
     void pointConfirmed(Base::Vector3d worldPt);
 
@@ -56,10 +84,18 @@ private Q_SLOTS:
     void onServiceStateChanged();
     void onActiveChanged(bool active);
     void onSettingsChanged();
+    void onFinishLine();   // service->finishRequested: re-arm for the next line
 
 private:
     static void coinEventCB(void* userData, SoEventCallback* node);
     void        handleCoinEvent(SoEventCallback* node);
+
+    /** Escape: cancel entry, then release locks (never ends the command). */
+    void handleEscape();
+    /** Cancel key: finish the command outright. */
+    void cancelInput();
+    /** A point was placed (click or typed+confirm): advance the machine. */
+    void placePoint(const Base::Vector3d& world);
 
     /** Orient the compass to the service's working plane. */
     void syncCompassPlane();
@@ -86,6 +122,9 @@ private:
     SoNodeSensor*        _camSensor { nullptr };   // recompute size on zoom/orbit
 
     Base::Vector3d       _lastPoint;
+    InputState           _state { InputState::Idle };
+    bool                 _continueMode { true };
+    bool                 _hasBasePoint { false };
     bool                 _active { false };
     bool                 _hasPositionSource { false };
 };

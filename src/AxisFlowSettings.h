@@ -75,6 +75,16 @@ public:
     bool alwaysShowCompass() const { return _alwaysShowCompass; }
     void setAlwaysShowCompass(bool v);
 
+    // ---- live guide line (compass centre -> cursor) -----------------------
+    /** Draw the live guide line from the compass centre to the cursor. */
+    bool          liveLineEnabled() const { return _liveLineEnabled; }
+    /** 0 = solid, 1 = dashed, 2 = dotted, 3 = dash-dot. */
+    int           liveLineStyle()   const { return _liveLineStyle; }
+    unsigned long liveLineColor()   const { return _liveLineColor; }   // 0xRRGGBBAA
+    void setLiveLineEnabled(bool v);
+    void setLiveLineStyle(int v);
+    void setLiveLineColor(unsigned long rgba);
+
     // ---- hotkeys ----------------------------------------------------------
     /** Fill @p hk from the settings; actions with no stored key keep their
      *  built-in default, an explicitly stored 0 means "unbound". */
@@ -103,6 +113,9 @@ private:
     unsigned long _activeFieldColor  { 0xDCDCDCFFul };   // slightly darker field
     double        _fillTransparency  { 0.65 };
     bool          _alwaysShowCompass { false };
+    bool          _liveLineEnabled   { true };
+    int           _liveLineStyle     { 1 };            // dashed
+    unsigned long _liveLineColor     { 0xFFE633FFul };  // warm yellow
 };
 
 } // namespace AxisFlowGui

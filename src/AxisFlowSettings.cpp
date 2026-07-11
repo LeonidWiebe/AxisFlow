@@ -24,6 +24,9 @@ constexpr unsigned long kDefColorY = 0x00FF00FFul;   // green
 constexpr unsigned long kDefActiveField = 0xDCDCDCFFul;   // a touch darker than a plain field
 constexpr double kDefFillTransp    = 0.65;
 constexpr bool   kDefAlwaysShow    = false;
+constexpr bool          kDefLiveLineEnabled = true;
+constexpr int           kDefLiveLineStyle   = 1;   // dashed
+constexpr unsigned long kDefLiveLineColor   = 0xFFE633FFul;
 
 double clamp01(double v)
 {
@@ -64,6 +67,10 @@ void AxisFlowSettings::load()
     _activeFieldColor = g->GetUnsigned("ActiveFieldColor", kDefActiveField);
     _fillTransparency = clamp01(g->GetFloat("FillTransparency", kDefFillTransp));
     _alwaysShowCompass = g->GetBool("AlwaysShowCompass", kDefAlwaysShow);
+    _liveLineEnabled   = g->GetBool("LiveLineEnabled", kDefLiveLineEnabled);
+    _liveLineStyle     = static_cast<int>(g->GetInt("LiveLineStyle", kDefLiveLineStyle));
+    _liveLineColor     = g->GetUnsigned("LiveLineColor", kDefLiveLineColor);
+    if (_liveLineStyle < 0 || _liveLineStyle > 3) _liveLineStyle = kDefLiveLineStyle;
 
     // Guard against a nonsensical stored size; a zero-size compass is invisible
     // and looks like a bug rather than a setting.
@@ -86,6 +93,9 @@ void AxisFlowSettings::save()
     g->SetUnsigned("ActiveFieldColor", _activeFieldColor);
     g->SetFloat("FillTransparency", _fillTransparency);
     g->SetBool("AlwaysShowCompass", _alwaysShowCompass);
+    g->SetBool("LiveLineEnabled", _liveLineEnabled);
+    g->SetInt("LiveLineStyle", _liveLineStyle);
+    g->SetUnsigned("LiveLineColor", _liveLineColor);
 }
 
 void AxisFlowSettings::resetDefaults()
@@ -99,6 +109,9 @@ void AxisFlowSettings::resetDefaults()
     _activeFieldColor  = kDefActiveField;
     _fillTransparency  = kDefFillTransp;
     _alwaysShowCompass = kDefAlwaysShow;
+    _liveLineEnabled   = kDefLiveLineEnabled;
+    _liveLineStyle     = kDefLiveLineStyle;
+    _liveLineColor     = kDefLiveLineColor;
     save();
 
     // Hotkeys: drop the stored overrides so the built-in layout applies again.
@@ -188,6 +201,31 @@ void AxisFlowSettings::setAlwaysShowCompass(bool v)
     if (v == _alwaysShowCompass) return;
     _alwaysShowCompass = v;
     group()->SetBool("AlwaysShowCompass", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setLiveLineEnabled(bool v)
+{
+    if (v == _liveLineEnabled) return;
+    _liveLineEnabled = v;
+    group()->SetBool("LiveLineEnabled", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setLiveLineStyle(int v)
+{
+    if (v < 0 || v > 3) v = 1;
+    if (v == _liveLineStyle) return;
+    _liveLineStyle = v;
+    group()->SetInt("LiveLineStyle", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setLiveLineColor(unsigned long rgba)
+{
+    if (rgba == _liveLineColor) return;
+    _liveLineColor = rgba;
+    group()->SetUnsigned("LiveLineColor", rgba);
     Q_EMIT changed();
 }
 

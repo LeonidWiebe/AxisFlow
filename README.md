@@ -28,7 +28,7 @@ It supplies the input half of a drawing tool: the compass anchored at a referenc
 
 That separation is the whole design. Any workbench, command, or macro can use AxisFlow through its Python API without AxisFlow knowing anything about it — the dependency runs one way only. A consumer is free to build its geometry with whatever it likes, including FreeCAD's own `Draft.make_line` / `make_wire` / `make_circle`, which live in `draftmake/*` and touch neither `Snapper` nor `DraftToolBar`.
 
-Consequently AxisFlow ships no Line, Rectangle, Arc or Circle commands, and none are planned. A single demo command exists purely as an end-to-end test of the input cycle and lives outside the core.
+Consequently AxisFlow ships no Line, Rectangle, Arc or Circle commands, and none are planned. A single demo command (`axisflow_demo.line()`) exists purely as an end-to-end test of the input cycle -- it lives outside the core and builds its geometry with `Draft.make_wire`, drawing its own live preview with a small self-owned Coin node.
 
 ## Why not build on Draft's input
 
@@ -42,28 +42,110 @@ An optional Draft adapter (`axisflow_snap.py`) still exists, but only as a coope
 
 ## Status
 
-Working today: the constraint solver (ortho and radial, working-plane relative, axis locks, smart lock); a singleton service with signals; a Coin3D compass; a floating panel with title bar, live read-out and lock checkboxes; a reconfigurable key map persisted to FreeCAD's parameter tree; the settings layer below; a standalone tool that owns cursor, clicks and keys in the 3D view; and the optional Draft adapter.
+Working today: the constraint solver (ortho and radial, working-plane relative, axis locks, smart lock); a singleton service with signals; a Coin3D compass that orients to the working plane (contour + centre point, square in ortho / circle in radial, no Z axis, size and colours from settings); a configurable **live guide line** from the compass centre to the cursor (on/off, style and colour from settings); a floating panel with editable unit-aware fields, an active field chosen by the nearest axis with a highlight and Tab cycling, lock checkboxes, "just start typing" with the caret always in the active field, and a **Local/World coordinate-frame** button; a reconfigurable key map persisted to FreeCAD's parameter tree; an input state machine (Idle/Tracking/Finished, continue mode, finish-line vs cancel-command, Enter commits a point); the public **`getPoint(callback, movecallback, last, continuous, finishcallback)`** callback API; a demo Line command that draws multiple lines with a live preview and picks up the active working plane; and the optional Draft adapter.
 
-Not there yet: the compass rework (contour, no Z axis, working-plane orientation); the full own-input loop ("just start typing", `Base::Quantity` parsing, relative/absolute coordinates); the public `getPoint` callback API; the polar lock in the solver; multi-axis lock; Sketcher.
+Not there yet: the polar (radial) lock in the solver; multi-axis lock; typed **absolute/relative** entry beyond the per-axis world conversion; a workbench icon and a settings dialog; Sketcher.
+
+## Keys and their configuration
+
+AxisFlow is keyboard-first. Inside its own tools the caret always sits in the active coordinate field, so digits edit the field while bound letters act as commands. Every binding is a **Qt key code → action** map with sensible defaults, stored in FreeCAD's parameter tree and reconfigurable at runtime.
+
+### Default keys (inside AxisFlow's own tools)
+
+**Global actions** — resolved wherever the session has focus (the coordinate window or the 3-D view). Combinations with Ctrl / Alt / Meta are never claimed and pass through to FreeCAD.
+
+| Key | Action | What it does |
+|---|---|---|
+| `Insert` | ToggleActive | turn AxisFlow on / off |
+| `Space` | ToggleMode | switch ortho ↔ radial (rectangular ↔ polar) |
+| `Enter`, numpad `Enter` | ConfirmPoint | place the point; commits the typed coordinates |
+| `X` | LockX | lock the X (compass-u) axis; press again to release |
+| `Y` | LockY | lock the Y (compass-v) axis; press again to release |
+| `Z` | LockZ | lock the Z (compass-normal) axis; press again to release |
+| `Escape` | FinishLine | finish the **current** line (it is saved) and start a new one; the compass and coordinate window stay up |
+| `` ` `` (backtick) | CancelCommand | finish the current line **and** end the whole command |
+
+**Coordinate-window editing keys** — active while a field has the caret (own-tool mode):
+
+| Key | What it does |
+|---|---|
+| `0`–`9`, `.`, `,`, `-`, `+` | start / continue typing a value into the active field |
+| `Backspace` | delete the last character of the entry |
+| `Delete` | clear the entry and release that field's override |
+| `Tab` / `Shift`+`Tab` | move the active field to the next / previous visible field |
+| the global keys above | still act as actions even while a field is focused |
+
+Note on the coordinate-frame button: the button below the fields is **not** a mode toggle. It switches the read-out (and typed entry) between **Local** — offset from the compass origin along the compass axes — and **World** — the same axes measured from the world origin. Ortho/radial stays on `Space`, shown by the field labels (`X`/`Y`/`Z` vs `D`/`A`).
+
+Actions with **no default key** but available through the API: `SmartLock` (lock the axis nearest the cursor, toggle), `ClearLocks` (drop all axis locks), `CancelEntry` (layered: abort a value entry, then release locks).
+
+### Reconfiguring keys
+
+Bindings live under `User parameter:BaseApp/Preferences/Mod/AxisFlow` as `Hotkey.<Action>` entries: a comma-separated list of Qt key codes (an empty string means "unbound"). Change them from Python:
+
+```python
+import AxisFlow as AF
+from PySide import QtCore
+
+# Rebind "finish line" from Escape to F2 (persisted to settings):
+AF.setHotkey(int(QtCore.Qt.Key_F2), 'finishline')
+
+# Unbind a key (e.g. free Space so it does nothing):
+AF.setHotkey(int(QtCore.Qt.Key_Space), 'none')
+
+# Session-scoped change that must NOT touch the stored layout (persist=False):
+AF.setHotkey(int(QtCore.Qt.Key_X), 'none', False)
+
+# Inspect the live map, and restore the built-in layout:
+AF.getSettings()['hotkeys']       # -> {'FinishLine': [16777216], 'LockX': [88], ...}
+AF.loadHotkeysFromSettings()      # re-apply defaults + stored overrides
+AF.resetSettings()                # restore ALL defaults (options + hotkeys)
+```
+
+Action names accepted by `setHotkey` (case-insensitive-friendly lowercase): `toggleactive`, `togglemode`, `smartlock`, `lockx`, `locky`, `lockz`, `clearlocks`, `cancelentry`, `cancelcommand`, `finishline`, `confirmpoint`, `none`.
+
+An action may hold several keys (e.g. `ConfirmPoint` is bound to both `Return` and the numpad `Enter`); `getSettings()['hotkeys']` lists each action's full key list.
+
+The optional Draft adapter deliberately unbinds `X`/`Y`/`Z`/`Enter`/`Escape` for the duration of its session (with `persist=False`, so your stored layout is untouched) because those belong to Draft while its command runs.
 
 ## Settings
 
-All options are stored in FreeCAD's own parameter tree under `User parameter:BaseApp/Preferences/Mod/AxisFlow`. That is an XML file (`user.cfg`) in the user's config directory: always writable, surviving a module reinstall, readable identically from C++ and Python.
+All options are stored in FreeCAD's own parameter tree under `User parameter:BaseApp/Preferences/Mod/AxisFlow`. That is an XML file (`user.cfg`) in the user's config directory: always writable, surviving a module reinstall, readable identically from C++ and Python. Every option is also reachable from Python via `AF.getSettings()` / `AF.setSetting(name, value)`.
 
-| Key | Type | Default | Meaning |
-|---|---|---|---|
-| `CompassSize` | Int | 120 | compass size, pixels |
-| `AxisThickness` | Int | 2 | axis line thickness, pixels |
-| `AxisStartPct` | Float | 0.15 | where an axis starts, as a fraction of the centre-to-contour distance |
-| `AxisLengthPct` | Float | 0.70 | axis length, same fraction |
-| `AxisColorX` | Unsigned | `0xFF0000FF` | X axis colour (`0xRRGGBBAA`), red by default |
-| `AxisColorY` | Unsigned | `0x00FF00FF` | Y axis colour, green by default |
-| `ActiveFieldColor` | Unsigned | `0xDCDCDCFF` | background of the active coordinate field |
-| `FillTransparency` | Float | 0.65 | transparency of the compass fill (0..1) |
-| `AlwaysShowCompass` | Bool | false | show the compass whenever loaded, not only during a command |
-| `Hotkey.<Action>` | ASCII | see below | comma-separated Qt key codes; empty = unbound |
+| Key | `setSetting` name | Type | Default | Meaning |
+|---|---|---|---|---|
+| `CompassSize` | `compassSize` | Int | 120 | compass size, pixels |
+| `AxisThickness` | `axisThickness` | Int | 2 | axis line thickness, pixels |
+| `AxisStartPct` | `axisStartPct` | Float | 0.15 | where an axis starts, as a fraction of the centre-to-contour distance |
+| `AxisLengthPct` | `axisLengthPct` | Float | 0.70 | axis length, same fraction |
+| `AxisColorX` | `axisColorX` | Unsigned | `0xFF0000FF` | X axis colour (`0xRRGGBBAA`), red by default |
+| `AxisColorY` | `axisColorY` | Unsigned | `0x00FF00FF` | Y axis colour, green by default |
+| `ActiveFieldColor` | `activeFieldColor` | Unsigned | `0xDCDCDCFF` | background of the active coordinate field |
+| `FillTransparency` | `fillTransparency` | Float | 0.65 | transparency of the compass fill (0..1) |
+| `AlwaysShowCompass` | `alwaysShowCompass` | Bool | false | show the compass whenever loaded, not only during a command |
+| `LiveLineEnabled` | `liveLineEnabled` | Bool | true | draw the live guide line from the compass centre to the cursor |
+| `LiveLineStyle` | `liveLineStyle` | Int | 1 | 0 = solid, 1 = dashed, 2 = dotted, 3 = dash-dot |
+| `LiveLineColor` | `liveLineColor` | Unsigned | `0xFFE633FF` | live guide line colour (`0xRRGGBBAA`) |
+| `Hotkey.<Action>` | — | ASCII | see above | comma-separated Qt key codes; empty = unbound |
 
-Actions: `ToggleActive`, `ToggleMode`, `SmartLock`, `LockX`, `LockY`, `LockZ`, `ClearLocks`.
+Actions used as `Hotkey.<Action>` keys: `ToggleActive`, `ToggleMode`, `SmartLock`, `LockX`, `LockY`, `LockZ`, `ClearLocks`, `CancelEntry`, `CancelCommand`, `FinishLine`, `ConfirmPoint`.
+
+```python
+import AxisFlow as AF
+AF.setSetting('liveLineEnabled', False)   # hide the live guide line
+AF.setSetting('liveLineStyle', 0)         # solid
+AF.setSetting('liveLineColor', 0x33CCFFFF)# light blue
+AF.setSetting('compassSize', 160)
+AF.getSettings()                          # -> dict, including the 'hotkeys' map
+AF.resetSettings()                        # restore built-in defaults
+```
+
+## Commands
+
+The workbench menu / toolbar exposes:
+
+* **Activate AxisFlow** (`AxisFlow_Activate`) — toggle the standalone compass tool on the active 3-D view.
+* **Toggle live line** (`AxisFlow_ToggleLiveLine`) — show / hide the live guide line (flips `liveLineEnabled`; the change is persisted).
 
 ## Build (Windows)
 
@@ -75,10 +157,10 @@ rmdir /s /q build
 cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config RelWithDebInfo
 cmake --install build
-REM axisflow_snap.py is installed too; the Mod path is queried from FreeCAD
+REM axisflow_snap.py and axisflow_demo.py are installed too; the Mod path is queried from FreeCAD
 ```
 
-The module installs into FreeCAD's own user Mod directory (`%APPDATA%\FreeCAD\v1-1\Mod\AxisFlow\` on 1.1, queried from FreeCAD rather than hard-coded) and builds as `AxisFlow.pyd`. Adding or renaming sources requires a clean reconfigure — delete `build` first.
+The module installs into FreeCAD's own user Mod directory (`%APPDATA%\FreeCAD\v1-1\Mod\AxisFlow\` on 1.1, queried from FreeCAD rather than hard-coded) and builds as `AxisFlow.pyd`. Adding or renaming sources requires a clean reconfigure — delete `build` first. Pure-Python files (`axisflow_demo.py`, `axisflow_snap.py`) can be dropped into the Mod directory without rebuilding.
 
 ## Python API
 
@@ -87,7 +169,7 @@ import AxisFlow as AF
 
 AF.isActive()                     # -> bool
 AF.activate() / AF.deactivate()
-AF.beginSession() / AF.endSession()   # raise/tear down compass + panel
+AF.beginSession() / AF.endSession()   # raise / tear down compass + panel
 
 AF.setPlane(u, v, normal)         # orient the compass (App.Vector each)
 AF.resetPlane()
@@ -113,9 +195,48 @@ AF.setSetting('compassSize', 160)
 AF.resetSettings()
 ```
 
-Default keys inside AxisFlow's own tools: `X` / `Y` / `Z` lock an axis (press again to release), `Space` toggles ortho/radial, `Enter` smart-locks the nearest axis, `Escape` clears locks, `Insert` turns AxisFlow on and off.
+### getPoint — the consumer entry point
 
-A `getPoint(last=None, callback=..., movecallback=...)` entry point, mirroring the idiom consumers already know from `Snapper.getPoint`, is the next milestone — it is what will let a consumer write a drawing command in a dozen lines.
+```python
+AF.getPoint(callback=None, movecallback=None, last=None,
+            continuous=False, finishcallback=None)
+```
+
+* `callback(point, ok)` — a point was confirmed (`ok=True`, `point` is a `Base.Vector`) or the command was cancelled (`ok=False`, `point=None`).
+* `movecallback(point)` — the live solved point on every cursor move; draw your own preview here.
+* `finishcallback()` — the user pressed FinishLine (Escape): finish the current line and keep drawing; the session stays up.
+* `last` — an optional base point (relative-input anchor).
+* `continuous` — `False` fires `callback` once, then finishes; `True` fires per point until cancel.
+
+**Working plane.** AxisFlow constrains points to the plane through the anchor with the compass orientation. A consumer that wants to draw on FreeCAD's active working plane should sync it once at command start:
+
+```python
+import WorkingPlane, FreeCAD as App
+wp = WorkingPlane.get_working_plane()
+AF.setPlane(App.Vector(wp.u), App.Vector(wp.v), App.Vector(wp.axis))
+```
+
+`axisflow_demo.py` does exactly this. A minimal multi-line consumer:
+
+```python
+import AxisFlow as AF, FreeCAD as App, Draft
+
+class Line:
+    def __init__(self): self.pts = []
+    def on_point(self, p, ok):
+        if not ok:                       # backtick: end command
+            self.finish(); AF.endSession(); return
+        self.pts.append(App.Vector(p))
+    def on_finish(self):                 # Escape: save this line, keep going
+        self.finish(); self.pts = []
+    def finish(self):
+        if len(self.pts) >= 2:
+            Draft.make_wire(self.pts, closed=False)
+            App.ActiveDocument.recompute()
+
+d = Line()
+AF.getPoint(callback=d.on_point, finishcallback=d.on_finish, continuous=True)
+```
 
 ## Optional Draft adapter
 
@@ -133,20 +254,22 @@ The adapter constrains nothing and binds no keys. It mirrors Draft's own lock in
 src/
   AppAxisFlow.cpp            module entry; attaches the Python method table
   Workbench.{h,cpp}          thin workbench (menu + toolbar)
-  Command.cpp                "Activate AxisFlow" (standalone tool)
+  Command.cpp                "Activate AxisFlow" + "Toggle live line"
   AxisFlowSolver.{h,cpp}     pure math: plane, origin, axis lock, key overrides
   AxisFlowService.{h,cpp}    singleton brain: state, signals, hotkeys, actions
   AxisFlowSettings.{h,cpp}   persistent options on FreeCAD's ParameterGrp
   AxisFlowHotkeys.{h,cpp}    reconfigurable Qt-key -> action map
-  AxisFlowEventFilter.{h,cpp}  global key filter, used by the adapter only
-  AxisFlowCompass.{h,cpp}    Coin3D scene graph (compass + guide line)
-  AxisFlowPanel.{h,cpp}      floating Qt panel (title/power, read-out, locks)
+  AxisFlowEventFilter.{h,cpp}  global key filter (app-wide + adapter)
+  AxisFlowCompass.{h,cpp}    Coin3D scene graph (compass + live guide line)
+  AxisFlowPanel.{h,cpp}      floating Qt panel (title/power, read-out, locks, Local/World)
   AxisFlowTool.{h,cpp}       per-view coordinator (standalone / adapter)
+  AxisFlowGetPoint.{h,cpp}   getPoint() bridge: Python callbacks <- state machine
   AxisFlowPy.cpp             Python bindings (module `AxisFlow`)
 axisflow_snap.py             optional Draft adapter
+axisflow_demo.py             demo Line command (reference consumer, outside core)
 ```
 
-Only one input session may be active at a time — the service is a singleton by deliberate choice.
+Only one input session may be active at a time — the service is a singleton by deliberate choice. Session teardown is deferred (`deleteLater`) so it is safe to end a command from inside the very event handler that owns the tool.
 
 ## License / status
 

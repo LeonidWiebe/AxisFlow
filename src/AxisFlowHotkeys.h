@@ -19,7 +19,11 @@ enum class AxisAction {
     LockX,
     LockY,
     LockZ,
-    ClearLocks
+    ClearLocks,
+    CancelEntry,    // Escape: cancel value entry, then (next press) release locks
+    CancelCommand,  // separate key: end the drawing command
+    FinishLine,     // finish the current polyline but keep the session running
+    ConfirmPoint    // Enter: place the current point (commit typed coords)
 };
 
 /**

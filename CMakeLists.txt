@@ -90,6 +90,7 @@ set(SOURCES
     src/AxisFlowPanel.cpp
     src/AxisFlowEventFilter.cpp
     src/AxisFlowSettings.cpp
+    src/AxisFlowGetPoint.cpp
 )
 
 set(HEADERS
@@ -102,6 +103,7 @@ set(HEADERS
     src/AxisFlowPanel.h
     src/AxisFlowEventFilter.h
     src/AxisFlowSettings.h
+    src/AxisFlowGetPoint.h
 )
 
 qt6_wrap_cpp(MOC_SOURCES
@@ -109,6 +111,7 @@ qt6_wrap_cpp(MOC_SOURCES
     src/AxisFlowService.h
     src/AxisFlowPanel.h
     src/AxisFlowSettings.h
+    src/AxisFlowGetPoint.h
 )
 
 qt6_add_resources(QRC_SOURCES resources/AxisFlow.qrc)
@@ -216,6 +219,8 @@ install(TARGETS AxisFlow
 )
 install(FILES InitGui.py        DESTINATION "${FREECAD_MOD_DIR}")
 install(FILES axisflow_snap.py  DESTINATION "${FREECAD_MOD_DIR}")
+install(FILES axisflow_demo.py  DESTINATION "${FREECAD_MOD_DIR}")
+install(DIRECTORY Resources     DESTINATION "${FREECAD_MOD_DIR}")
 
 message(STATUS "=== AxisFlow build config ===")
 message(STATUS "  Qt6 dir     : ${Qt6_DIR}")
@@ -223,3 +228,16 @@ message(STATUS "  Coin4 lib   : ${COIN4_LIB}")
 message(STATUS "  FreeCAD src : ${FREECAD_SRC}")
 message(STATUS "  FreeCAD libs: ${FREECAD_LIBRARIES}")
 message(STATUS "  Install to  : ${FREECAD_MOD_DIR}")
+
+# ---------------------------------------------------------------------------
+# Tests
+# ---------------------------------------------------------------------------
+# Tier 1 -- C++ unit tests (Solver + Hotkeys). Built only with
+#   -DAXISFLOW_BUILD_TESTS=ON  (the option is declared in tests/CMakeLists.txt).
+# enable_testing() at the top level so `ctest --test-dir build` sees the tests.
+enable_testing()
+add_subdirectory(tests)
+
+# Tier 2 -- Python API tests, run under a GUI FreeCAD:
+#   FreeCAD --run-test TestAxisFlow
+install(FILES TestAxisFlow.py DESTINATION "${FREECAD_MOD_DIR}")

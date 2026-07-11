@@ -33,14 +33,25 @@ for _d in _dll_dirs:
 
 import AxisFlow
 
+_icons_dir = os.path.join(_mod_dir, "Resources", "icons")
+if os.path.isdir(_icons_dir):
+    FreeCADGui.addIconPath(_icons_dir)
+
 
 class AxisFlowWorkbenchPy(FreeCADGui.Workbench):
+    # NOTE: FreeCAD runs InitGui.py with separate globals/locals, so names
+    # assigned at module top level (like _icons_dir) are NOT visible inside a
+    # class/def body. Keep the body literal-only and set Icon below at top level.
     MenuText = "AxisFlow"
     ToolTip  = "Precise coordinate input (AxisFlow-style)"
     Icon     = ""
 
     def Initialize(self):
-        self.list = ["AxisFlow_Activate"]
+        self.list = [
+            "AxisFlow_Activate",
+            "AxisFlow_DrawLine",
+            "AxisFlow_ToggleLiveLine",
+        ]
         self.appendToolbar("AxisFlow", self.list)
         self.appendMenu("AxisFlow", self.list)
 
@@ -49,6 +60,10 @@ class AxisFlowWorkbenchPy(FreeCADGui.Workbench):
 
     def Deactivated(self):
         pass
+
+
+# Top level: names ARE visible here, so resolve the icon path now.
+AxisFlowWorkbenchPy.Icon = os.path.join(_icons_dir, "AxisFlow.svg")
 
 
 FreeCADGui.addWorkbench(AxisFlowWorkbenchPy)

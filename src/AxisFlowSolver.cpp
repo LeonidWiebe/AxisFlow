@@ -193,6 +193,12 @@ bool AxisFlowSolver::hasValueZ() const     { return !std::isnan(_kZ); }
 bool AxisFlowSolver::hasValueDist() const  { return !std::isnan(_kDist); }
 bool AxisFlowSolver::hasValueAngle() const { return !std::isnan(_kAngle); }
 
+double AxisFlowSolver::getValueX() const     { return _kX; }
+double AxisFlowSolver::getValueY() const     { return _kY; }
+double AxisFlowSolver::getValueZ() const     { return _kZ; }
+double AxisFlowSolver::getValueDist() const  { return _kDist; }
+double AxisFlowSolver::getValueAngle() const { return _kAngle; }
+
 void AxisFlowSolver::clearValueX()     { _kX = NaN; }
 void AxisFlowSolver::clearValueY()     { _kY = NaN; }
 void AxisFlowSolver::clearValueZ()     { _kZ = NaN; }

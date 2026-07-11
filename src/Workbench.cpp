@@ -21,6 +21,8 @@ Gui::MenuItem* AxisFlowWorkbench::setupMenuBar() const
     Gui::MenuItem* axisflow = new Gui::MenuItem;
     axisflow->setCommand("AxisFlow");
     *axisflow << "AxisFlow_Activate";
+    *axisflow << "AxisFlow_DrawLine";
+    *axisflow << "AxisFlow_ToggleLiveLine";
 
     root->insertItem(item, axisflow);
     return root;
@@ -33,6 +35,8 @@ Gui::ToolBarItem* AxisFlowWorkbench::setupToolBars() const
     Gui::ToolBarItem* bar = new Gui::ToolBarItem(root);
     bar->setCommand("AxisFlow");
     *bar << "AxisFlow_Activate";
+    *bar << "AxisFlow_DrawLine";
+    *bar << "AxisFlow_ToggleLiveLine";
 
     return root;
 }

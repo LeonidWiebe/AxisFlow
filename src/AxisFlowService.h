@@ -149,6 +149,8 @@ public:
     void clearKeyValue(int field);
     /** True if field 0/1/2 currently carries a typed override. */
     bool hasKeyValue(int field) const;
+    /** The signed override value for a field (NaN when unset). */
+    double keyValue(int field) const;
 
     /**
      * Re-solve the last raw cursor point and re-emit cursorMoved.
@@ -183,6 +185,13 @@ Q_SIGNALS:
     void activeChanged(bool active);
     /** A point was committed as the new origin. */
     void pointConfirmed(Base::Vector3d worldPt);
+    /** A consumer/tool should end the current drawing command (CancelCommand). */
+    void cancelRequested();
+    /** Finish the current line/polyline but keep the session running so the
+     *  consumer can immediately start the next one (FinishLine / Escape). */
+    void finishRequested();
+    /** Enter/ConfirmPoint: the tool should place the current solved point. */
+    void confirmRequested();
     /** The cursor moved; carries the solved (constrained) world point. */
     void cursorMoved(Base::Vector3d solvedWorld);
 

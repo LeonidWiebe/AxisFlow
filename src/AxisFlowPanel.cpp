@@ -87,7 +87,8 @@ void AxisFlowPanel::buildUi()
     _editC  = new QLineEdit;  _editC->setPlaceholderText(QLatin1String("0.000"));
     rowC->addWidget(_lockC); rowC->addWidget(_labelC); rowC->addWidget(_editC);
 
-    _modeBtn = new QPushButton(QStringLiteral("Rect"));
+    _frameBtn = new QPushButton(QStringLiteral("Local"));
+    _frameBtn->setToolTip(QLatin1String("Coordinates: Local (compass) or World"));
 
     // AxisFlow owns the input in its own tools, so the fields are editable.
     // Digits, separators and a sign only: letters are reserved for the action
@@ -103,7 +104,7 @@ void AxisFlowPanel::buildUi()
     mainLayout->addLayout(rowA);
     mainLayout->addLayout(rowB);
     mainLayout->addLayout(rowC);
-    mainLayout->addWidget(_modeBtn);
+    mainLayout->addWidget(_frameBtn);
 }
 
 void AxisFlowPanel::wireToService()
@@ -120,9 +121,13 @@ void AxisFlowPanel::wireToService()
     connect(_powerBtn, &QToolButton::clicked, this,
             [](bool){ AxisFlowService::instance().deactivate(); });
 
-    // Mode button -> service.
-    connect(_modeBtn, &QPushButton::clicked, this,
-            [](bool){ AxisFlowService::instance().toggleMode(); });
+    // Coordinate-frame button -> toggle Local <-> World readout. Mode
+    // (rect/polar) stays on Space; the field labels already show it.
+    connect(_frameBtn, &QPushButton::clicked, this, [this](bool){
+        _worldFrame = !_worldFrame;
+        updateFrameButton();
+        AxisFlowService::instance().refreshCursor();   // redraw fields in the new frame
+    });
 
     // Lock checkboxes -> service. 'clicked' fires only on user interaction, so
     // setLockState()'s programmatic setChecked() won't feed back here.
@@ -150,15 +155,6 @@ void AxisFlowPanel::wireToService()
     connect(_editB, &QLineEdit::textEdited, this, onEdited(1));
     connect(_editC, &QLineEdit::textEdited, this, onEdited(2));
 
-    // Enter runs whatever the keymap binds to Return (smart lock by default).
-    auto onReturn = []() {
-        AxisFlowService& s = AxisFlowService::instance();
-        s.performAction(s.actionForKey(Qt::Key_Return));
-    };
-    connect(_editA, &QLineEdit::returnPressed, this, onReturn);
-    connect(_editB, &QLineEdit::returnPressed, this, onReturn);
-    connect(_editC, &QLineEdit::returnPressed, this, onReturn);
-
     // Bound letters (X/Y/Z/Space/...) must act even while a field has focus,
     // otherwise they would just be typed into the number.
     _editA->installEventFilter(this);
@@ -169,6 +165,14 @@ void AxisFlowPanel::wireToService()
     connect(&AxisFlowSettings::instance(), &AxisFlowSettings::changed,
             this, [this]{ refreshActiveHighlight(); });
 
+    // A confirmed point clears overrides in the solver; drop our entry state too
+    // so the fields follow the cursor again and the next digit starts fresh.
+    connect(&AxisFlowService::instance(), &AxisFlowService::pointConfirmed,
+            this, [this](Base::Vector3d){
+                _entryField = -1;
+                focusActiveField();
+            });
+
     // Initial sync.
     refreshActiveHighlight();
     onServiceState();
@@ -178,28 +182,27 @@ void AxisFlowPanel::wireToService()
 
 void AxisFlowPanel::setValues(double x, double y, double z)
 {
-    // A field carrying a typed override must never be overwritten by the live
-    // read-out: the 3-D view takes focus back as soon as the mouse moves, so
-    // hasFocus() alone is not enough to protect what the user is typing.
     const AxisFlowService& s = AxisFlowService::instance();
-    auto held = [&](int i, QLineEdit* e) {
-        // Held while it carries an override, while it is being typed into (even
-        // if the text does not parse yet, e.g. a lone "-"), or while focused.
-        return s.hasKeyValue(i) || i == _entryField || e->hasFocus();
+    auto held = [&](int i) {
+        // Protect a field only while it is genuinely being typed into or carries
+        // an override. NOT on hasFocus(): the caret now lives in the active
+        // field at all times, so focus no longer means "the user is typing" --
+        // gating on it would freeze the live read-out under the blinking caret.
+        return s.hasKeyValue(i) || i == _entryField;
     };
-    if (!held(0, _editA)) _editA->setText(QString::number(x, 'f', 4));
-    if (!held(1, _editB)) _editB->setText(QString::number(y, 'f', 4));
-    if (!held(2, _editC)) _editC->setText(QString::number(z, 'f', 4));
+    if (!held(0)) _editA->setText(QString::number(x, 'f', 4));
+    if (!held(1)) _editB->setText(QString::number(y, 'f', 4));
+    if (!held(2)) _editC->setText(QString::number(z, 'f', 4));
 }
 
 void AxisFlowPanel::setValuesDist(double dist, double angle)
 {
     const AxisFlowService& s = AxisFlowService::instance();
-    auto held = [&](int i, QLineEdit* e) {
-        return s.hasKeyValue(i) || i == _entryField || e->hasFocus();
+    auto held = [&](int i) {
+        return s.hasKeyValue(i) || i == _entryField;
     };
-    if (!held(0, _editA)) _editA->setText(QString::number(dist, 'f', 4));
-    if (!held(1, _editB)) _editB->setText(QString::number(angle, 'f', 2));
+    if (!held(0)) _editA->setText(QString::number(dist, 'f', 4));
+    if (!held(1)) _editB->setText(QString::number(angle, 'f', 2));
 }
 
 void AxisFlowPanel::setMode(bool polar)
@@ -210,17 +213,22 @@ void AxisFlowPanel::setMode(bool polar)
         _labelA->setText(QLatin1String("D"));
         _labelB->setText(QLatin1String("A"));
         _editC->setVisible(false); _labelC->setVisible(false); _lockC->setVisible(false);
-        _modeBtn->setText(QLatin1String("Polar"));
     } else {
         _labelA->setText(QLatin1String("X"));
         _labelB->setText(QLatin1String("Y"));
         _editC->setVisible(true); _labelC->setVisible(true); _lockC->setVisible(true);
-        _modeBtn->setText(QLatin1String("Rect"));
     }
     // Z disappears in polar: the active field must stay within range.
     setActiveField(_activeField);
     refreshActiveHighlight();
     adjustSize();
+}
+
+void AxisFlowPanel::updateFrameButton()
+{
+    if (_frameBtn)
+        _frameBtn->setText(_worldFrame ? QLatin1String("World")
+                                       : QLatin1String("Local"));
 }
 
 void AxisFlowPanel::setLockState(int lockedField)
@@ -272,17 +280,81 @@ void AxisFlowPanel::pushFieldValue(int index, const QString& text)
 {
     AxisFlowService& s = AxisFlowService::instance();
 
-    if (text.trimmed().isEmpty()) {
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty()) {
         // Clearing a field releases ONLY its own override; the others stay put.
         s.clearKeyValue(index);
         return;
     }
 
-    const double v = parseQuantity(text);
-    if (!std::isnan(v))
-        s.setKeyValue(index, v);
-    // An unparsable partial entry ("1,5 m" mid-typing, "-") is simply ignored
-    // until it becomes valid; nothing is reset under the user's fingers.
+    double v = parseQuantity(text);
+    if (std::isnan(v))
+        return;   // partial/invalid entry ("-", "1,") -- keep the last override
+
+    const bool rect = (s.mode() == CompassMode::Rectangular);
+
+    if (_worldFrame && rect) {
+        // World frame is absolute entry: the sign is whatever the user typed.
+        // Convert the world coordinate along the axis to a local origin offset.
+        const Base::Vector3d o = s.origin();
+        const double proj = (index == 0) ? o.Dot(s.planeU())
+                          : (index == 1) ? o.Dot(s.planeV())
+                                         : o.Dot(s.planeNormal());
+        s.setKeyValue(index, v - proj);
+        return;
+    }
+
+    // Local rectangular entry, AccuDraw-style: a bare magnitude takes the sign
+    // of the cursor's current direction along this axis, so pointing down -X and
+    // typing "5" locks X = -5 (and the live line follows). An explicit sign the
+    // user typed always wins; polar distance/angle are entered as-is.
+    const bool explicitSign = trimmed.startsWith(QLatin1Char('-'))
+                           || trimmed.startsWith(QLatin1Char('+'));
+    if (rect && !explicitSign) {
+        const Base::Vector3d l = s.localOffset();   // raw cursor direction
+        const double dir = (index == 0) ? l.x : (index == 1) ? l.y : l.z;
+        v = (dir < 0.0) ? -std::abs(v) : std::abs(v);
+    }
+    s.setKeyValue(index, v);
+    // An unparsable partial entry is simply ignored until it becomes valid;
+    // nothing is reset under the user's fingers.
+}
+
+int AxisFlowPanel::fieldDecimals(int index) const
+{
+    // Match the live read-out: angle (polar field 1) is 2 decimals, else 4.
+    if (_polar && index == 1)
+        return 2;
+    return 4;
+}
+
+void AxisFlowPanel::reformatField(int index)
+{
+    // Normalise a committed manual entry when the field loses focus. We display
+    // the SIGNED override value (frame-transformed), so a magnitude typed while
+    // pointing down an axis picks up its direction sign here: "5" -> "-5.0000".
+    // Units are already normalised (the override is in base units). A plain
+    // read-out field (no override) is left to setValues().
+    AxisFlowService& s = AxisFlowService::instance();
+    if (!s.hasKeyValue(index))
+        return;
+    QLineEdit* edits[3] = { _editA, _editB, _editC };
+    QLineEdit* edit = (index >= 0 && index < 3) ? edits[index] : nullptr;
+    if (!edit)
+        return;
+    double disp = s.keyValue(index);          // signed local override
+    if (std::isnan(disp))
+        return;
+    if (_worldFrame && s.mode() == CompassMode::Rectangular) {
+        const Base::Vector3d o = s.origin();
+        const double proj = (index == 0) ? o.Dot(s.planeU())
+                          : (index == 1) ? o.Dot(s.planeV())
+                                         : o.Dot(s.planeNormal());
+        disp += proj;                         // local -> world for display
+    }
+    const QString formatted = QString::number(disp, 'f', fieldDecimals(index));
+    if (formatted != edit->text())
+        edit->setText(formatted);   // programmatic: no textEdited, no re-push
 }
 
 void AxisFlowPanel::setActiveField(int index)
@@ -299,6 +371,12 @@ void AxisFlowPanel::setActiveField(int index)
 
 void AxisFlowPanel::focusActiveField()
 {
+    // Only when AxisFlow owns the input. In the Draft adapter, grabbing focus
+    // here -- which happens on every cursor move via setActiveField() -- would
+    // yank the caret out of Draft's coordinate field mid-typing.
+    if (!_ownsInput)
+        return;
+
     QLineEdit* edits[3] = { _editA, _editB, _editC };
     QLineEdit* target = edits[_activeField];
     if (!target || !target->isVisible())
@@ -367,7 +445,10 @@ bool AxisFlowPanel::startTyping(QChar ch)
 {
     // The first character lands in whichever field is active; from then on the
     // entry (and therefore the active field) is frozen.
-    const int idx = (_entryField >= 0) ? _entryField : _activeField;
+    // The digit always targets the ACTIVE field. After Tab, _entryField still
+    // points at the previously typed field, so keying off it would type into the
+    // wrong field / append; _activeField is the field the user actually selected.
+    const int idx = _activeField;
     QLineEdit* edits[3] = { _editA, _editB, _editC };
     QLineEdit* target = edits[idx];
     if (!target || !target->isVisible())
@@ -425,6 +506,32 @@ bool AxisFlowPanel::clearEntry()
     return true;
 }
 
+void AxisFlowPanel::cancelInput()
+{
+    AxisFlowService& s = AxisFlowService::instance();
+
+    // Layer 1: an entry is being typed -> drop it and release its override.
+    if (_entryField >= 0) {
+        const int idx = _entryField;
+        entryEdit()->clear();
+        _entryField = -1;
+        s.clearKeyValue(idx);          // read-out takes the field back
+        focusActiveField();
+        return;
+    }
+
+    // Layer 1b: a value was committed but nothing is mid-typing -> drop values.
+    if (s.hasKeyValue(0) || s.hasKeyValue(1) || s.hasKeyValue(2)) {
+        s.clearKeyValues();
+        focusActiveField();
+        return;
+    }
+
+    // Layer 2: nothing typed -> release the axis lock.
+    s.clearLocks();
+    focusActiveField();
+}
+
 bool AxisFlowPanel::isEntryStartKey(const QKeyEvent* ke)
 {
     const QString t = ke->text();
@@ -475,6 +582,15 @@ bool AxisFlowPanel::eventFilter(QObject* obj, QEvent* ev)
         return QWidget::eventFilter(obj, ev);
     }
 
+    // Round a committed manual entry to the standard precision when its field
+    // loses focus (Tab, click away, window deactivation): "5" -> "5.0000".
+    if (ev->type() == QEvent::FocusOut &&
+        (obj == _editA || obj == _editB || obj == _editC)) {
+        const int idx = (obj == _editB) ? 1 : (obj == _editC ? 2 : 0);
+        reformatField(idx);
+        return QWidget::eventFilter(obj, ev);
+    }
+
     // Action keys must fire even while a value field has focus.
     if (ev->type() == QEvent::KeyPress &&
         (obj == _editA || obj == _editB || obj == _editC)) {
@@ -486,19 +602,30 @@ bool AxisFlowPanel::eventFilter(QObject* obj, QEvent* ev)
         }
 
         // The caret lives in the active field, which shows the live read-out.
-        // The FIRST typed character must therefore replace that read-out, not be
-        // appended to it: "1500" typed over "1234.5678" must not become
-        // "1234.56781500".
-        if (_entryField < 0 && isEntryStartKey(ke)) {
+        // The FIRST typed character must replace that read-out, not be appended.
+        // "Fresh" means the digit lands in a DIFFERENT field than the one being
+        // typed -- including after Tab, where _entryField still points at the
+        // previous field (that was the bug: the new field kept its dynamic value
+        // and the digit appended, e.g. Z became "0.00005").
+        if (isEntryStartKey(ke)) {
             QLineEdit* edit = qobject_cast<QLineEdit*>(obj);
             const int idx = (edit == _editB) ? 1 : (edit == _editC ? 2 : 0);
-            _entryField = idx;
-            edit->clear();
-            return QWidget::eventFilter(obj, ev);   // let QLineEdit insert it
+            if (_entryField != idx) {
+                _entryField = idx;
+                edit->clear();               // replace the read-out
+            }
+            return QWidget::eventFilter(obj, ev);   // let QLineEdit insert the char
         }
 
-        if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter ||
-            isValueKey(ke))
+        if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) {
+            // Enter commits the point (whatever the keymap binds to it), rather
+            // than being eaten by the line edit. Typed values are already live
+            // overrides on the solver, so the solved point includes them.
+            AxisFlowService& sv = AxisFlowService::instance();
+            sv.performAction(sv.actionForKey(ke->key()));
+            return true;
+        }
+        if (isValueKey(ke))
             return QWidget::eventFilter(obj, ev);
 
         // Bound keys always act, even mid-entry: after typing "1500" the X key
@@ -506,6 +633,10 @@ bool AxisFlowPanel::eventFilter(QObject* obj, QEvent* ev)
         // anyway (validator), so there is no ambiguity with unit suffixes.
         AxisFlowService& s = AxisFlowService::instance();
         AxisAction a = s.actionForKey(ke->key());
+        if (a == AxisAction::CancelEntry) {
+            cancelInput();
+            return true;
+        }
         if (a != AxisAction::None) {
             s.performAction(a);
             return true;
@@ -539,6 +670,7 @@ void AxisFlowPanel::keyPressEvent(QKeyEvent* e)
 
     AxisFlowService& s = AxisFlowService::instance();
     AxisAction a = s.actionForKey(e->key());
+    if (a == AxisAction::CancelEntry) { cancelInput(); return; }
     if (a != AxisAction::None) {
         s.performAction(a);
         return;
@@ -582,10 +714,21 @@ void AxisFlowPanel::onCursorMoved(Base::Vector3d /*solved*/)
 
     AxisFlowService& s = AxisFlowService::instance();
     if (s.mode() == CompassMode::Polar) {
+        // Polar is inherently a relative distance/angle; the frame toggle only
+        // affects the rectangular read-out.
         setValuesDist(s.distance(), s.angleDeg());
     } else {
         Base::Vector3d l = s.localOffset();
-        setValues(l.x, l.y, l.z);
+        if (_worldFrame) {
+            // Same compass axes, but measured from the world origin instead of
+            // the compass origin: value_i = localOffset_i + origin . axis_i.
+            const Base::Vector3d o = s.origin();
+            setValues(l.x + o.Dot(s.planeU()),
+                      l.y + o.Dot(s.planeV()),
+                      l.z + o.Dot(s.planeNormal()));
+        } else {
+            setValues(l.x, l.y, l.z);
+        }
     }
 }
 

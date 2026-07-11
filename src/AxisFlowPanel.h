@@ -56,6 +56,13 @@ public:
     bool clearEntry();
 
     /**
+     * Layered cancel (Escape). First press aborts an in-progress value entry and
+     * releases that field's override; if there is nothing being typed, it
+     * releases the axis locks. Never ends the command (a separate key does).
+     */
+    void cancelInput();
+
+    /**
      * The field where a value is expected / being typed. Exactly one field is
      * always active. It follows the axis the cursor leans towards, EXCEPT while
      * an entry is in progress -- then it is frozen, whatever the cursor does.
@@ -72,6 +79,15 @@ public:
      * are forced to intercept keys application-wide and fight Qt for them.
      */
     void focusActiveField();
+
+    /**
+     * True only when AxisFlow drives the input itself (its own tool). Then, and
+     * only then, the panel keeps the caret in the active field. In the Draft
+     * adapter this is FALSE: the active field still moves and highlights, but
+     * the panel must never steal keyboard focus away from Draft's own fields.
+     */
+    void setOwnsInput(bool on) { _ownsInput = on; }
+    bool ownsInput() const { return _ownsInput; }
     /** Tab: move the active status to the next visible field. */
     void cycleActiveField();
 
@@ -107,6 +123,12 @@ private:
     void refreshActiveHighlight();
     /** Pick the active field from the axis the cursor leans towards. */
     void updateActiveFieldFromCursor();
+    /** Reflect the current readout frame (Local/World) on the frame button. */
+    void updateFrameButton();
+    /** Round a committed manual entry to the standard precision on focus-out. */
+    void reformatField(int index);
+    /** Decimals shown per field: 2 for the polar angle, 4 otherwise. */
+    int  fieldDecimals(int index) const;
 
     QLabel*      _title  {nullptr};
     QToolButton* _powerBtn {nullptr};
@@ -120,9 +142,10 @@ private:
     QLabel*      _labelA {nullptr};
     QLabel*      _labelB {nullptr};
     QLabel*      _labelC {nullptr};
-    QPushButton* _modeBtn {nullptr};
+    QPushButton* _frameBtn {nullptr};   // toggles Local <-> World readout
 
     bool         _polar { false };
+    bool         _worldFrame { false };   // false = compass-local, true = world
 
     // Frameless-window drag state (title bar).
     bool         _dragging { false };
@@ -133,6 +156,7 @@ private:
     int          _entryField { -1 };
     /** Always 0..2 (0/1 in polar). Frozen while _entryField >= 0. */
     int          _activeField { 0 };
+    bool         _ownsInput   { false };   // AxisFlow drives input (own tool)
 };
 
 } // namespace AxisFlowGui

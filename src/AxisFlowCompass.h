@@ -57,6 +57,10 @@ public:
     /** Guide line endpoint, in world space. */
     void setCursorPoint(const SbVec3f& pt);
 
+    /** Style the live guide line: on/off, pattern (0 solid,1 dash,2 dot,3 dash-dot),
+     *  colour 0xRRGGBBAA. */
+    void applyGuideStyle(bool enabled, int style, unsigned long rgba);
+
     /** Centre-to-contour distance, in world units. */
     void setRadius(float worldRadius);
     float radius() const { return _radius; }
@@ -117,6 +121,8 @@ private:
     SoBaseColor*   _colorGuide { nullptr };
     SoCoordinate3* _coordGuide { nullptr };
     SoLineSet*     _lineGuide  { nullptr };
+    SoDrawStyle*   _styleGuide { nullptr };
+    bool           _guideEnabled { true };
 
     float   _radius  { 50.0f };
     bool    _visible { true };

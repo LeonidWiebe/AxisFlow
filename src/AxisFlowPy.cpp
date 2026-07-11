@@ -14,6 +14,7 @@
 #include "AxisFlowService.h"
 #include "AxisFlowSettings.h"
 #include "AxisFlowCompass.h"
+#include "AxisFlowGetPoint.h"
 #include "AxisFlowTool.h"
 
 using namespace AxisFlowGui;
@@ -44,6 +45,10 @@ static AxisAction actionFromString(const std::string& s)
     if (s == "locky")      return AxisAction::LockY;
     if (s == "lockz")      return AxisAction::LockZ;
     if (s == "clearlocks") return AxisAction::ClearLocks;
+    if (s == "cancelentry") return AxisAction::CancelEntry;
+    if (s == "cancelcommand") return AxisAction::CancelCommand;
+    if (s == "finishline") return AxisAction::FinishLine;
+    if (s == "confirmpoint") return AxisAction::ConfirmPoint;
     return AxisAction::None;
 }
 
@@ -271,7 +276,7 @@ PyObject* axisflow_beginSession(PyObject*, PyObject*)
 
     if (g_session) {
         g_session->deactivate();
-        delete g_session;
+        g_session->deleteLater();
         g_session = nullptr;
     }
 
@@ -285,11 +290,94 @@ PyObject* axisflow_beginSession(PyObject*, PyObject*)
     return PyBool_FromLong(0);
 }
 
-PyObject* axisflow_endSession(PyObject*, PyObject*)
+// Ensure g_session exists as AxisFlow's OWN tool (owns keyboard, caret, Coin
+// position source). getPoint always runs its own input, never the adapter.
+static bool ensureOwnSession()
 {
+    if (g_session && g_session->hasPositionSource() && g_session->isActive())
+        return true;
+
     if (g_session) {
         g_session->deactivate();
-        delete g_session;
+        g_session->deleteLater();
+        g_session = nullptr;
+    }
+    Gui::View3DInventor* v = activeView3D();
+    if (!v)
+        return false;
+
+    g_session = new AxisFlowTool(v);
+    g_session->activate(true);   // own tool: Coin position source + keyboard
+    return true;
+}
+
+PyObject* axisflow_getPoint(PyObject*, PyObject* args, PyObject* kwds)
+{
+    static const char* kwlist[] = {
+        "callback", "movecallback", "last", "continuous", "finishcallback", nullptr
+    };
+    PyObject* cb       = nullptr;
+    PyObject* moveCb   = nullptr;
+    PyObject* lastObj  = nullptr;
+    int       continuous = 0;
+    PyObject* finishCb = nullptr;
+    if (!PyArg_ParseTupleAndKeywords(
+            args, kwds, "|OOOpO",
+            const_cast<char**>(kwlist),
+            &cb, &moveCb, &lastObj, &continuous, &finishCb))
+        return nullptr;
+
+    auto validCallable = [](PyObject* o, const char* name) -> bool {
+        if (o && o != Py_None && !PyCallable_Check(o)) {
+            PyErr_Format(PyExc_TypeError, "%s must be callable", name);
+            return false;
+        }
+        return true;
+    };
+    if (!validCallable(cb, "callback") || !validCallable(moveCb, "movecallback")
+        || !validCallable(finishCb, "finishcallback"))
+        return nullptr;
+    if (cb == Py_None)     cb = nullptr;
+    if (moveCb == Py_None) moveCb = nullptr;
+    if (finishCb == Py_None) finishCb = nullptr;
+
+    if (!ensureOwnSession()) {
+        PyErr_SetString(PyExc_RuntimeError,
+                        "AxisFlow.getPoint: no active 3D view");
+        return nullptr;
+    }
+
+    // (Re)start point collection, then bridge the callbacks onto it.
+    g_session->beginInput(continuous != 0);
+
+    // Optional base point (relative-input anchor) -- after beginInput, which
+    // resets the sequence.
+    if (lastObj && lastObj != Py_None) {
+        try {
+            Base::Vector3d last = Py::Vector(Py::Object(lastObj)).toVector();
+            g_session->setBasePoint(last);
+        }
+        catch (const Py::Exception&) {
+            return nullptr;   // Py error already set
+        }
+    }
+
+    auto* bridge = new GetPointBridge(g_session, cb, moveCb, finishCb, continuous != 0);
+    bridge->start();
+
+    Py_RETURN_NONE;
+}
+
+PyObject* axisflow_endSession(PyObject*, PyObject*)
+{
+    GetPointBridge::discardActive();
+    if (g_session) {
+        // endSession() is typically reached from within a getPoint callback,
+        // i.e. deep inside Qt event dispatch owned by g_session's own filter.
+        // deactivate() detaches everything from the world synchronously; the
+        // object itself is destroyed later, off the current call stack.
+        g_session->deactivate();
+        g_session->deleteLater();
         g_session = nullptr;
     }
     AxisFlowService::instance().deactivate();
@@ -332,6 +420,9 @@ PyObject* axisflow_getSettings(PyObject*, PyObject*)
     setItem("activeFieldColor", PyLong_FromUnsignedLong(s.activeFieldColor()));
     setItem("fillTransparency", PyFloat_FromDouble(s.fillTransparency()));
     setItem("alwaysShowCompass", PyBool_FromLong(s.alwaysShowCompass() ? 1 : 0));
+    setItem("liveLineEnabled",  PyBool_FromLong(s.liveLineEnabled() ? 1 : 0));
+    setItem("liveLineStyle",    PyLong_FromLong(s.liveLineStyle()));
+    setItem("liveLineColor",    PyLong_FromUnsignedLong(s.liveLineColor()));
 
     // Hotkeys as {'SmartLock': [16777220, 16777221], ...}; [] means unbound.
     PyObject* hk = PyDict_New();
@@ -373,6 +464,9 @@ PyObject* axisflow_setSetting(PyObject*, PyObject* args)
     else if (k == "activeFieldColor")  s.setActiveFieldColor(PyLong_AsUnsignedLong(val));
     else if (k == "fillTransparency")  s.setFillTransparency(PyFloat_AsDouble(val));
     else if (k == "alwaysShowCompass") s.setAlwaysShowCompass(PyObject_IsTrue(val) == 1);
+    else if (k == "liveLineEnabled")   s.setLiveLineEnabled(PyObject_IsTrue(val) == 1);
+    else if (k == "liveLineStyle")     s.setLiveLineStyle(static_cast<int>(PyLong_AsLong(val)));
+    else if (k == "liveLineColor")     s.setLiveLineColor(PyLong_AsUnsignedLong(val));
     else {
         PyErr_Format(PyExc_KeyError, "unknown AxisFlow setting: %s", k.c_str());
         return nullptr;
@@ -453,11 +547,17 @@ PyMethodDef AxisFlowMethods[] = {
      "updateCursor(raw[, last]) -> Vector. Like solve(), but also updates the UI."},
     {"beginSession",   axisflow_beginSession,   METH_NOARGS,
      "beginSession() -> bool. Activate AxisFlow and show compass+panel on the active view."},
+    {"getPoint",       (PyCFunction)(void*)axisflow_getPoint, METH_VARARGS | METH_KEYWORDS,
+     "getPoint(callback=None, movecallback=None, last=None, continuous=False, finishcallback=None).\n"
+     "callback(point, ok): point is a Base.Vector (ok=True) or None (cancel, ok=False).\n"
+     "movecallback(point): live point on every cursor move.\n"
+     "finishcallback(): FinishLine/Escape fired; finish the current line, session keeps running.\n"
+     "continuous=False fires once; True fires per point until cancel."},
     {"endSession",     axisflow_endSession,     METH_NOARGS,
      "endSession(). Tear down the UI session and deactivate the service."},
     {"setHotkey",      axisflow_setHotkey,      METH_VARARGS,
      "setHotkey(qtKeyCode, 'toggleactive'|'togglemode'|'smartlock'|'lockx'|'locky'|'lockz'"
-     "|'clearlocks'|'none'[, persist=True]). persist=False = session-scoped rebind."},
+     "|'clearlocks'|'cancelentry'|'cancelcommand'|'finishline'|'confirmpoint'|'none'[, persist=True])."},
     {"confirm",        axisflow_confirm,        METH_VARARGS,
      "confirm(point). Commit a point as the new compass origin."},
     {"setPlane",       axisflow_setPlane,       METH_VARARGS,
@@ -483,7 +583,7 @@ PyMethodDef AxisFlowMethods[] = {
     {"setSetting",     axisflow_setSetting,     METH_VARARGS,
      "setSetting(name, value). name in {compassSize, axisThickness, axisStartPct, "
      "axisLengthPct, axisColorX, axisColorY, activeFieldColor, fillTransparency, "
-     "alwaysShowCompass}."},
+     "alwaysShowCompass, liveLineEnabled, liveLineStyle, liveLineColor}."},
     {"resetSettings",  axisflow_resetSettings,  METH_NOARGS,
      "resetSettings(). Restore built-in defaults (options and hotkeys)."},
     {"loadHotkeysFromSettings", axisflow_loadHotkeysFromSettings, METH_NOARGS,

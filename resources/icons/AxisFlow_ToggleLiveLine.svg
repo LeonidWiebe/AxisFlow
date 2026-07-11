@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Live line: dashed guide from the compass centre to the cursor -->
+  <circle cx="14" cy="50" r="4.4" fill="#2C3E50"/>
+  <line x1="14" y1="50" x2="44" y2="20" stroke="#E0A800" stroke-width="3.2"
+        stroke-linecap="round" stroke-dasharray="5 4"/>
+  <!-- cursor crosshair -->
+  <circle cx="46" cy="18" r="7" fill="none" stroke="#2C3E50" stroke-width="2.2"/>
+  <line x1="46" y1="8"  x2="46" y2="28" stroke="#2C3E50" stroke-width="1.8"/>
+  <line x1="36" y1="18" x2="56" y2="18" stroke="#2C3E50" stroke-width="1.8"/>
+</svg>

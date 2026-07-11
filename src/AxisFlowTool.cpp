@@ -36,13 +36,9 @@ AxisFlowTool::AxisFlowTool(Gui::View3DInventor* view, QObject* parent)
     : QObject(parent)
     , _view(view)
 {
-    AxisFlowService& svc = AxisFlowService::instance();
-    connect(&svc, &AxisFlowService::cursorMoved,  this, &AxisFlowTool::onCursorMoved);
-    connect(&svc, &AxisFlowService::stateChanged, this, &AxisFlowTool::onServiceStateChanged);
-    connect(&svc, &AxisFlowService::activeChanged, this, &AxisFlowTool::onActiveChanged);
-    connect(&AxisFlowSettings::instance(), &AxisFlowSettings::changed,
-            this, &AxisFlowTool::onSettingsChanged);
-
+    // Signal connections are scoped to the active window (see activate()), not
+    // the object lifetime: with deferred destruction a just-deactivated tool
+    // can briefly outlive its replacement and must not react in the meantime.
     _compass = new AxisFlowCompass;
 }
 
@@ -59,6 +55,18 @@ void AxisFlowTool::activate(bool withPositionSource)
     if (_active) return;
     _active = true;
     _hasPositionSource = withPositionSource;
+
+    // Listen to the service only while active. The guard above rules out a
+    // double-connect, and deactivate() tears these down again.
+    AxisFlowService& svc = AxisFlowService::instance();
+    connect(&svc, &AxisFlowService::cursorMoved,      this, &AxisFlowTool::onCursorMoved);
+    connect(&svc, &AxisFlowService::stateChanged,     this, &AxisFlowTool::onServiceStateChanged);
+    connect(&svc, &AxisFlowService::activeChanged,    this, &AxisFlowTool::onActiveChanged);
+    connect(&svc, &AxisFlowService::cancelRequested,  this, &AxisFlowTool::cancelInput);
+    connect(&svc, &AxisFlowService::finishRequested,  this, &AxisFlowTool::onFinishLine);
+    connect(&svc, &AxisFlowService::confirmRequested, this, &AxisFlowTool::confirmPoint);
+    connect(&AxisFlowSettings::instance(), &AxisFlowSettings::changed,
+            this, &AxisFlowTool::onSettingsChanged);
 
     Gui::View3DInventorViewer* viewer = _view->getViewer();
     SoSeparator* root = static_cast<SoSeparator*>(viewer->getSceneGraph());
@@ -78,6 +86,7 @@ void AxisFlowTool::activate(bool withPositionSource)
 
     // Shared, autonomous panel.
     AxisFlowPanel* panel = AxisFlowPanel::instance();
+    panel->setOwnsInput(withPositionSource);   // adapter never grabs the caret
     QPoint pos = _view->mapToGlobal(QPoint(20, 20));
     panel->move(pos);
     panel->show();
@@ -102,8 +111,10 @@ void AxisFlowTool::activate(bool withPositionSource)
 
     // AccuDraw model: the caret lives in the active coordinate field from the
     // moment the tool starts, so typing just works and global shortcuts do not.
-    if (withPositionSource)
+    if (withPositionSource) {
+        beginInput(/*continueMode*/ true);   // Idle, ready for the first point
         panel->focusActiveField();
+    }
 }
 
 void AxisFlowTool::deactivate()
@@ -111,13 +122,28 @@ void AxisFlowTool::deactivate()
     if (!_active) return;
     _active = false;
 
+    // Stop listening immediately. With deferred destruction this object may
+    // outlive the current teardown; it must not react to the service signals
+    // emitted below (or to a new session's signals) once it is being retired.
+    disconnect(&AxisFlowService::instance(),  nullptr, this, nullptr);
+    disconnect(&AxisFlowSettings::instance(), nullptr, this, nullptr);
+
+    AxisFlowPanel::instance()->setOwnsInput(false);
+
     AxisFlowService::instance().deactivate();
 
     detachCameraSensor();
 
     if (_keyFilter) {
+        // deactivate() can run from *inside* the filter's own eventFilter()
+        // (backtick -> CancelCommand -> cancelRequested -> endSession). Deleting
+        // the filter synchronously here would free an object whose method is
+        // still on the call stack. Unregister it from qApp now (safe mid-
+        // dispatch), detach it from this tool so ~AxisFlowTool won't touch it,
+        // and defer the actual destruction to the event loop.
         _keyFilter->remove();
-        delete _keyFilter;
+        _keyFilter->setParent(nullptr);
+        _keyFilter->deleteLater();
         _keyFilter = nullptr;
     }
 
@@ -224,21 +250,80 @@ SbVec3f AxisFlowTool::unprojectToCompassPlane(const SbVec2s& pixel)
 void AxisFlowTool::confirmPoint()
 {
     AxisFlowService& svc = AxisFlowService::instance();
+    placePoint(svc.currentSolved());
+}
 
-    Base::Vector3d solved = svc.currentSolved();
-    _lastPoint = solved;
+void AxisFlowTool::beginInput(bool continueMode)
+{
+    _continueMode = continueMode;
+    _hasBasePoint = false;
+    _state = InputState::Idle;
+    AxisFlowService::instance().clearLocks();
+    AxisFlowService::instance().clearKeyValues();
+}
 
-    svc.confirm(solved);   // moves origin, clears overrides + lock, emits signals
+void AxisFlowTool::setBasePoint(const Base::Vector3d& world)
+{
+    // Seed the anchor (e.g. getPoint's 'last') without confirming a point, so no
+    // pointConfirmed fires and no consumer callback is triggered for the seed.
+    _lastPoint = world;
+    _hasBasePoint = true;
+    _state = InputState::Tracking;
+
+    AxisFlowService::instance().setOrigin(world);
+    _compass->setOrigin(SbVec3f(
+        float(world.x), float(world.y), float(world.z)));
+}
+
+void AxisFlowTool::placePoint(const Base::Vector3d& world)
+{
+    if (_state == InputState::Finished)
+        return;
+
+    AxisFlowService& svc = AxisFlowService::instance();
+    _lastPoint = world;
+
+    // Anchor the compass at the new point and reset per-point state (an AxisFlow
+    // lock and any typed values are per-point in AccuDraw).
+    svc.confirm(world);   // moves origin, clears overrides + lock, emits signals
+    _hasBasePoint = true;
 
     _compass->setOrigin(SbVec3f(
-        float(solved.x), float(solved.y), float(solved.z)));
+        float(world.x), float(world.y), float(world.z)));
 
     // Clicking in the 3-D view hands keyboard focus to the viewport. Take it
     // straight back, or the next digit becomes a FreeCAD view shortcut.
     if (_hasPositionSource)
         AxisFlowPanel::instance()->focusActiveField();
 
-    Q_EMIT pointConfirmed(solved);
+    // Idle -> Tracking on the first point; stay Tracking while continuing.
+    _state = _continueMode ? InputState::Tracking : InputState::Finished;
+
+    Q_EMIT pointConfirmed(world);
+}
+
+void AxisFlowTool::handleEscape()
+{
+    // Layered cancel lives in the panel (it owns the entry state).
+    AxisFlowPanel::instance()->cancelInput();
+}
+
+void AxisFlowTool::cancelInput()
+{
+    _state = InputState::Finished;
+    AxisFlowService::instance().clearLocks();
+    AxisFlowService::instance().clearKeyValues();
+    // Note: the tool stays activated (compass/panel remain) -- ending the DRAW
+    // command is the consumer's business. This just stops point collection.
+}
+
+void AxisFlowTool::onFinishLine()
+{
+    // FinishLine (Escape): the consumer commits the current polyline; the tool
+    // re-arms so the next click starts a fresh line. The session (compass,
+    // panel) stays up throughout.
+    if (!_active) return;
+    beginInput(_continueMode);
 }
 
 // ---------------------------------------------------------------------------

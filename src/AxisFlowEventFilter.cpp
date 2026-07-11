@@ -151,6 +151,10 @@ bool AxisFlowEventFilter::eventFilter(QObject* watched, QEvent* ev)
 
     AxisFlowService& svc = AxisFlowService::instance();
     AxisAction a = svc.actionForKey(ke->key());
+    if (a == AxisAction::CancelEntry) {
+        AxisFlowPanel::instance()->cancelInput();   // layered: entry -> locks
+        return true;
+    }
     if (a != AxisAction::None) {
         svc.performAction(a);
         return true;
