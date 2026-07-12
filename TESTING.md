@@ -71,8 +71,48 @@ in the handoff notes. These need synthetic mouse/key events, a live scene graph
 and a visible display; automating them (QTest key injection + a framebuffer)
 is possible later but is high-friction on Windows and low-ROI for now.
 
-## Suggested CI shape
+## Running the tests locally
 
-* per-commit: Tier 1 (needs only FreeCAD Base + Qt/Python from the pixi env);
-* nightly / on-demand on a machine with a desktop session: Tier 2;
-* Tier 3 stays manual until a headless GUI harness is worth the cost.
+Tests are run on your own machine (no CI service required).
+
+### Tier 1 -- one command
+
+`run_tests.bat` (at the repo root) configures with `-DAXISFLOW_BUILD_TESTS=ON`,
+builds `AxisFlow_tests_run`, puts the pixi Python/Qt DLLs on `PATH`, and runs
+`ctest`. Double-click it, or from a shell:
+
+```bat
+run_tests.bat            REM configure + build + run
+run_tests.bat clean      REM wipe build\ first (fresh gtest + full rebuild)
+run_tests.bat nopause    REM no keypress at the end (for scripting)
+```
+
+Edit the `PIXI_ROOT` / `GENERATOR` / `CONFIG` lines at the top of the script if
+your paths differ. A green run ends with `ALL TESTS PASSED`; a failure returns a
+non-zero exit code and prints the failing tests.
+
+Equivalent manual commands:
+
+```bat
+cmake -B build -G "Visual Studio 17 2022" -A x64 -DAXISFLOW_BUILD_TESTS=ON
+cmake --build build --config RelWithDebInfo --target AxisFlow_tests_run
+set PATH=C:\projects\FreeCAD111\.pixi\envs\default\Library\bin;C:\projects\FreeCAD111\.pixi\envs\default;%PATH%
+ctest --test-dir build -C RelWithDebInfo --output-on-failure
+```
+
+### Tier 2 -- by hand in a GUI FreeCAD
+
+Needs a live FreeCAD (its `.pyd` links Gui), so run it from the Python console:
+
+```python
+import Test, TestAxisFlow
+Test.runTestsFromModule(TestAxisFlow)
+```
+
+(Install the module first so FreeCAD finds `TestAxisFlow.py`.)
+
+### Optional: GitHub Actions
+
+A ready-made self-hosted-runner workflow is included at
+`.github/workflows/ci.yml` if you ever want CI. It is not required for local
+testing and can be ignored or deleted; see the comments inside it for setup.

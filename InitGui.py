@@ -51,6 +51,7 @@ class AxisFlowWorkbenchPy(FreeCADGui.Workbench):
             "AxisFlow_Activate",
             "AxisFlow_DrawLine",
             "AxisFlow_ToggleLiveLine",
+            "AxisFlow_Settings",
         ]
         self.appendToolbar("AxisFlow", self.list)
         self.appendMenu("AxisFlow", self.list)

@@ -1,13 +1,34 @@
-<?xml version="1.0"?>
-<package format="1">
+<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
   <name>AxisFlow</name>
-  <version>0.1.1</version>
-  <date>2026-07-07</date>
   <description>
-    Dynamic drawing assistant for FreeCAD
+    Dynamic precision drawing assistant for FreeCAD: an AccuDraw-style compass
+    with unit-aware coordinate input, axis locks, and a live guide line.
   </description>
-  <maintainer>
-    Leonid Wiebe with Claude Opus 4.8
-  </maintainer>
-  <license>LGPL-2.1</license>
+  <version>0.1.1</version>
+  <date>2026-07-12</date>
+  <maintainer email="[email protected]">Leonid Wiebe</maintainer>
+  <license file="LICENSE">LGPL-2.1-or-later</license>
+
+  <url type="repository" branch="main">https://github.com/LeonidWiebe/AxisFlow</url>
+  <url type="bugtracker">https://github.com/LeonidWiebe/AxisFlow/issues</url>
+  <url type="readme">https://github.com/LeonidWiebe/AxisFlow/blob/main/README.md</url>
+
+  <icon>Resources/icons/AxisFlow.svg</icon>
+
+  <content>
+    <workbench>
+      <classname>AxisFlowWorkbenchPy</classname>
+      <name>AxisFlow</name>
+      <icon>Resources/icons/AxisFlow.svg</icon>
+      <description>AccuDraw-style dynamic coordinate input for FreeCAD.</description>
+    </workbench>
+  </content>
+
+  <!-- Compiled C++ workbench: the .pyd must match the user's FreeCAD ABI
+       (Python/Qt/Coin). Ship a matching prebuilt binary; the Addon Manager
+       does NOT compile C++ addons. -->
+  <dependencies>
+    <freecad version_gte="1.1.0"/>
+  </dependencies>
 </package>

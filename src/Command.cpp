@@ -148,10 +148,48 @@ bool CmdAxisFlowDrawLine::isActive()
 
 // ---------------------------------------------------------------------------
 
+// Opens the live settings dialog (axisflow_settings.py -- PySide UI over the
+// public getSettings()/setSetting() API).
+class CmdAxisFlowSettings : public Gui::Command
+{
+public:
+    CmdAxisFlowSettings();
+    const char* className() const override { return "CmdAxisFlowSettings"; }
+protected:
+    void activated(int iMsg) override;
+    bool isActive() override;
+};
+
+CmdAxisFlowSettings::CmdAxisFlowSettings()
+    : Gui::Command("AxisFlow_Settings")
+{
+    sAppModule   = "AxisFlow";
+    sGroup       = "AxisFlow";
+    sMenuText    = "Settings";
+    sToolTipText = "Open the AxisFlow settings (changes apply live)";
+    sWhatsThis   = "AxisFlow_Settings";
+    sStatusTip   = sToolTipText;
+    sPixmap      = "AxisFlow_Settings";
+}
+
+void CmdAxisFlowSettings::activated(int)
+{
+    doCommand(Gui::Command::Gui,
+              "import axisflow_settings\naxisflow_settings.show()");
+}
+
+bool CmdAxisFlowSettings::isActive()
+{
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+
 void CreateAxisFlowCommands()
 {
     Gui::CommandManager& mgr = Gui::Application::Instance->commandManager();
     mgr.addCommand(new CmdAxisFlowActivate());
     mgr.addCommand(new CmdAxisFlowDrawLine());
     mgr.addCommand(new CmdAxisFlowToggleLiveLine());
+    mgr.addCommand(new CmdAxisFlowSettings());
 }

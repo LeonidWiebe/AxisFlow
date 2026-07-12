@@ -1,6 +1,6 @@
 # AxisFlow Workbench for FreeCAD
 
-version 0.1 alpha
+version 0.1.1 (alpha)
 
 **AxisFlow** is a precision drawing assistant for FreeCAD, inspired by the workflow concept of **MicroStation AccuDraw**.
 
@@ -42,9 +42,9 @@ An optional Draft adapter (`axisflow_snap.py`) still exists, but only as a coope
 
 ## Status
 
-Working today: the constraint solver (ortho and radial, working-plane relative, axis locks, smart lock); a singleton service with signals; a Coin3D compass that orients to the working plane (contour + centre point, square in ortho / circle in radial, no Z axis, size and colours from settings); a configurable **live guide line** from the compass centre to the cursor (on/off, style and colour from settings); a floating panel with editable unit-aware fields, an active field chosen by the nearest axis with a highlight and Tab cycling, lock checkboxes, "just start typing" with the caret always in the active field, and a **Local/World coordinate-frame** button; a reconfigurable key map persisted to FreeCAD's parameter tree; an input state machine (Idle/Tracking/Finished, continue mode, finish-line vs cancel-command, Enter commits a point); the public **`getPoint(callback, movecallback, last, continuous, finishcallback)`** callback API; a demo Line command that draws multiple lines with a live preview and picks up the active working plane; and the optional Draft adapter.
+Working today: the constraint solver (ortho and radial, working-plane relative, axis locks, smart lock); a singleton service with signals; a Coin3D compass that orients to the working plane (contour + centre point, square in ortho / circle in radial, no Z axis, size and colours from settings); a configurable **live guide line** from the compass centre to the cursor (on/off, style and colour from settings); a floating panel with editable unit-aware fields, an active field chosen by the nearest axis with a highlight and Tab cycling, lock checkboxes, "just start typing" with the caret always in the active field, AccuDraw-style sign-from-direction and round-on-blur, and a **Local/World coordinate-frame** button; a reconfigurable key map persisted to FreeCAD's parameter tree; an input state machine (Idle/Tracking/Finished, continue mode, finish-line vs cancel-command, Enter commits a point); the public **`getPoint(callback, movecallback, last, continuous, finishcallback)`** callback API; a demo Line command that draws multiple lines with a live preview and picks up the active working plane; a live two-column **settings dialog** that applies every option on the fly; palette commands with icons and a workbench icon; automated tests (C++ unit tests plus a Python API suite); and the optional Draft adapter.
 
-Not there yet: the polar (radial) lock in the solver; multi-axis lock; typed **absolute/relative** entry beyond the per-axis world conversion; a workbench icon and a settings dialog; Sketcher.
+Not there yet: the polar (radial) lock in the solver; multi-axis lock; typed **absolute/relative** entry beyond the per-axis world conversion; a dockable coordinate panel; Sketcher.
 
 ## Keys and their configuration
 
@@ -76,6 +76,8 @@ AxisFlow is keyboard-first. Inside its own tools the caret always sits in the ac
 | the global keys above | still act as actions even while a field is focused |
 
 Note on the coordinate-frame button: the button below the fields is **not** a mode toggle. It switches the read-out (and typed entry) between **Local** — offset from the compass origin along the compass axes — and **World** — the same axes measured from the world origin. Ortho/radial stays on `Space`, shown by the field labels (`X`/`Y`/`Z` vs `D`/`A`).
+
+Entry behaviour (AccuDraw-style): the first character typed replaces the field's live read-out rather than appending to it. A bare magnitude takes the **sign of the cursor's current direction** along that axis — point down −X, type `5`, and X locks at −5 (the live line follows immediately); an explicitly typed sign always wins. On focus loss a committed value is rounded to the standard precision (4 decimals; 2 for the polar angle) and normalised (`5cm` → `50.0000`).
 
 Actions with **no default key** but available through the API: `SmartLock` (lock the axis nearest the cursor, toggle), `ClearLocks` (drop all axis locks), `CancelEntry` (layered: abort a value entry, then release locks).
 
@@ -112,6 +114,8 @@ The optional Draft adapter deliberately unbinds `X`/`Y`/`Z`/`Enter`/`Escape` for
 
 All options are stored in FreeCAD's own parameter tree under `User parameter:BaseApp/Preferences/Mod/AxisFlow`. That is an XML file (`user.cfg`) in the user's config directory: always writable, surviving a module reinstall, readable identically from C++ and Python. Every option is also reachable from Python via `AF.getSettings()` / `AF.setSetting(name, value)`.
 
+The **Settings** command (`AxisFlow_Settings`, gear icon) opens a live, non-modal editor: a two-column grid of name → value where each value widget matches the option's type (check box, combo, number spin, colour picker). Every change applies **on the fly** — there is no OK button — so the compass and panel update as you edit. It is a thin Python/PySide dialog (`axisflow_settings.py`); adding a future option is one row there plus a getter/setter in `AxisFlowSettings`.
+
 | Key | `setSetting` name | Type | Default | Meaning |
 |---|---|---|---|---|
 | `CompassSize` | `compassSize` | Int | 120 | compass size, pixels |
@@ -145,22 +149,47 @@ AF.resetSettings()                        # restore built-in defaults
 The workbench menu / toolbar exposes:
 
 * **Activate AxisFlow** (`AxisFlow_Activate`) — toggle the standalone compass tool on the active 3-D view.
+* **Draw line** (`AxisFlow_DrawLine`) — draw a polyline through AxisFlow's `getPoint()` API (Escape starts a new line, backtick ends the command). The geometry lives in the demo consumer, `axisflow_demo.py`.
 * **Toggle live line** (`AxisFlow_ToggleLiveLine`) — show / hide the live guide line (flips `liveLineEnabled`; the change is persisted).
+* **Settings** (`AxisFlow_Settings`) — open the live settings dialog described above.
+
+## Installation
+
+AxisFlow is a **compiled C++ workbench**, so it is not installed through FreeCAD's
+Addon Manager (which only handles Python-only addons). Install a prebuilt release:
+
+1. Download `AxisFlow-<version>-win64-FC1.1.zip` from the project's **Releases** page.
+2. Unzip it so the `AxisFlow` folder lands in your FreeCAD `Mod` directory — on
+   Windows `%APPDATA%\FreeCAD\Mod\`, giving `...\FreeCAD\Mod\AxisFlow\InitGui.py`.
+   (The exact path is printed by `App.getUserAppDataDir()` in FreeCAD's Python console.)
+3. Fully restart FreeCAD and pick **AxisFlow** from the workbench selector.
+
+A compiled `.pyd` only loads in a FreeCAD build whose **Python/Qt/Coin ABI matches**
+the one it was built against, so use a release built for your FreeCAD version. If the
+workbench doesn't appear after a restart, the binary likely doesn't match your build.
+Maintainers: see `RELEASE.md` for how to package and publish a release.
 
 ## Build (Windows)
 
 Reference environment: Windows, MSVC (Visual Studio 17 2022, x64), FreeCAD 1.1.1 with Qt 6 and Coin 4 from a **pixi** environment. See `BUILD_WINDOWS.md` for setup and `HANDOFF.md` for the CMake pinning and the build pitfalls already solved.
 
 ```bat
-cd C:\projects\AxisFlowFC
+cd C:\projects\AxisFlow
 rmdir /s /q build
 cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config RelWithDebInfo
 cmake --install build
-REM axisflow_snap.py and axisflow_demo.py are installed too; the Mod path is queried from FreeCAD
+REM the .py glue and Resources are installed too; the Mod path is queried from FreeCAD
 ```
 
-The module installs into FreeCAD's own user Mod directory (`%APPDATA%\FreeCAD\v1-1\Mod\AxisFlow\` on 1.1, queried from FreeCAD rather than hard-coded) and builds as `AxisFlow.pyd`. Adding or renaming sources requires a clean reconfigure — delete `build` first. Pure-Python files (`axisflow_demo.py`, `axisflow_snap.py`) can be dropped into the Mod directory without rebuilding.
+The module installs into FreeCAD's own user Mod directory (`%APPDATA%\FreeCAD\Mod\AxisFlow\`, queried from FreeCAD rather than hard-coded) and builds as `AxisFlow.pyd`. Adding or renaming sources requires a clean reconfigure — delete `build` first. Pure-Python files (`axisflow_demo.py`, `axisflow_snap.py`, `axisflow_settings.py`) can be dropped into the Mod directory without rebuilding.
+
+## Testing
+
+Automated tests come in two tiers (details in `TESTING.md`):
+
+* **Tier 1 — C++ unit tests** (solver + hotkeys + entry policy): pure logic, no GUI. Build with `-DAXISFLOW_BUILD_TESTS=ON` and run `ctest`, or just run `run_tests.bat`.
+* **Tier 2 — Python API tests** (`TestAxisFlow.py`): run inside a GUI FreeCAD with `import Test, TestAxisFlow; Test.runTestsFromModule(TestAxisFlow)`.
 
 ## Python API
 
@@ -254,23 +283,30 @@ The adapter constrains nothing and binds no keys. It mirrors Draft's own lock in
 src/
   AppAxisFlow.cpp            module entry; attaches the Python method table
   Workbench.{h,cpp}          thin workbench (menu + toolbar)
-  Command.cpp                "Activate AxisFlow" + "Toggle live line"
+  Command.cpp                Activate / Draw line / Toggle live line / Settings
   AxisFlowSolver.{h,cpp}     pure math: plane, origin, axis lock, key overrides
   AxisFlowService.{h,cpp}    singleton brain: state, signals, hotkeys, actions
   AxisFlowSettings.{h,cpp}   persistent options on FreeCAD's ParameterGrp
   AxisFlowHotkeys.{h,cpp}    reconfigurable Qt-key -> action map
+  AxisFlowEntry.h            pure entry policy (sign-from-direction); unit-tested
   AxisFlowEventFilter.{h,cpp}  global key filter (app-wide + adapter)
   AxisFlowCompass.{h,cpp}    Coin3D scene graph (compass + live guide line)
   AxisFlowPanel.{h,cpp}      floating Qt panel (title/power, read-out, locks, Local/World)
   AxisFlowTool.{h,cpp}       per-view coordinator (standalone / adapter)
   AxisFlowGetPoint.{h,cpp}   getPoint() bridge: Python callbacks <- state machine
   AxisFlowPy.cpp             Python bindings (module `AxisFlow`)
+tests/                       C++ unit tests (GoogleTest): solver, hotkeys, entry
 axisflow_snap.py             optional Draft adapter
 axisflow_demo.py             demo Line command (reference consumer, outside core)
+axisflow_settings.py         live settings dialog (Python/PySide)
+TestAxisFlow.py              Python API tests (run in a GUI FreeCAD)
 ```
 
 Only one input session may be active at a time — the service is a singleton by deliberate choice. Session teardown is deferred (`deleteLater`) so it is safe to end a command from inside the very event handler that owns the tool.
 
-## License / status
+## License
 
-Early alpha (0.1). Interfaces and behaviour are still changing. Contributions and issue reports are welcome.
+AxisFlow is licensed under the **GNU Lesser General Public License v2.1 or later**
+(LGPL-2.1-or-later); the full text is in the `LICENSE` file.
+
+Early alpha (0.1.x). Interfaces and behaviour are still changing. Contributions and issue reports are welcome.

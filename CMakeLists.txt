@@ -114,7 +114,7 @@ qt6_wrap_cpp(MOC_SOURCES
     src/AxisFlowGetPoint.h
 )
 
-qt6_add_resources(QRC_SOURCES resources/AxisFlow.qrc)
+qt6_add_resources(QRC_SOURCES Resources/AxisFlow.qrc)
 
 # ---------------------------------------------------------------------------
 # Target
@@ -220,6 +220,7 @@ install(TARGETS AxisFlow
 install(FILES InitGui.py        DESTINATION "${FREECAD_MOD_DIR}")
 install(FILES axisflow_snap.py  DESTINATION "${FREECAD_MOD_DIR}")
 install(FILES axisflow_demo.py  DESTINATION "${FREECAD_MOD_DIR}")
+install(FILES axisflow_settings.py DESTINATION "${FREECAD_MOD_DIR}")
 install(DIRECTORY Resources     DESTINATION "${FREECAD_MOD_DIR}")
 
 message(STATUS "=== AxisFlow build config ===")

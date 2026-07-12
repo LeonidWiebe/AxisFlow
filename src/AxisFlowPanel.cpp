@@ -4,6 +4,7 @@
 #include "AxisFlowService.h"
 #include "AxisFlowSettings.h"
 #include "AxisFlowHotkeys.h"
+#include "AxisFlowEntry.h"
 
 #include <Gui/MainWindow.h>
 
@@ -307,13 +308,14 @@ void AxisFlowPanel::pushFieldValue(int index, const QString& text)
     // Local rectangular entry, AccuDraw-style: a bare magnitude takes the sign
     // of the cursor's current direction along this axis, so pointing down -X and
     // typing "5" locks X = -5 (and the live line follows). An explicit sign the
-    // user typed always wins; polar distance/angle are entered as-is.
+    // user typed always wins; polar distance/angle are entered as-is. The rule
+    // itself lives in AxisFlowEntry.h so it can be unit-tested without the GUI.
     const bool explicitSign = trimmed.startsWith(QLatin1Char('-'))
                            || trimmed.startsWith(QLatin1Char('+'));
-    if (rect && !explicitSign) {
+    if (rect) {
         const Base::Vector3d l = s.localOffset();   // raw cursor direction
         const double dir = (index == 0) ? l.x : (index == 1) ? l.y : l.z;
-        v = (dir < 0.0) ? -std::abs(v) : std::abs(v);
+        v = signedByDirection(v, dir, explicitSign);
     }
     s.setKeyValue(index, v);
     // An unparsable partial entry is simply ignored until it becomes valid;

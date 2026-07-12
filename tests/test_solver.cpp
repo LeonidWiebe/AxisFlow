@@ -116,6 +116,26 @@ TEST(Solver, ClearKeyValuesReleasesEverything)
     expectVec(s.getSolvedPoint(), 3, 4, 5);
 }
 
+// ---- override value getters ----------------------------------------------
+
+TEST(Solver, ValueGettersReflectSetAndClear)
+{
+    AxisFlowSolver s;
+    EXPECT_FALSE(s.hasValueX());
+    EXPECT_TRUE(std::isnan(s.getValueX()));
+
+    s.setValueX(7.5);
+    EXPECT_TRUE(s.hasValueX());
+    EXPECT_DOUBLE_EQ(s.getValueX(), 7.5);
+
+    s.setValueX(-2.25);                 // a signed override round-trips
+    EXPECT_DOUBLE_EQ(s.getValueX(), -2.25);
+
+    s.clearValueX();
+    EXPECT_FALSE(s.hasValueX());
+    EXPECT_TRUE(std::isnan(s.getValueX()));
+}
+
 // ---- nearest axis ---------------------------------------------------------
 
 TEST(Solver, NearestAxisPicksTheLeaningDirection)

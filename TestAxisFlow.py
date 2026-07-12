@@ -99,15 +99,15 @@ class TestAxisFlowApi(unittest.TestCase):
         self.assertAlmostEqual(p.z, 0)
 
     # -- hotkeys / settings ------------------------------------------------
+    # Qt key codes are stable ABI constants; use them directly to avoid the
+    # PySide6 scoped-enum question (Qt.Key_F7 vs Qt.Key.Key_F7).
     def test_hotkeys_roundtrip(self):
-        from PySide import QtCore
-        code = int(QtCore.Qt.Key_F7)
+        code = 0x01000036          # Qt::Key_F7
         AF.setHotkey(code, 'lockx', False)             # persist=False
         self.assertIn(code, AF.getSettings()['hotkeys'].get('LockX', []))
 
     def test_finishline_is_bindable(self):
-        from PySide import QtCore
-        code = int(QtCore.Qt.Key_F8)
+        code = 0x01000037          # Qt::Key_F8
         AF.setHotkey(code, 'finishline', False)
         self.assertIn(code, AF.getSettings()['hotkeys'].get('FinishLine', []))
 
@@ -135,7 +135,12 @@ class TestAxisFlowSessionGui(unittest.TestCase):
                 Gui.activateWorkbench("AxisFlowWorkbenchPy")
             except Exception:
                 pass
-            view = getattr(Gui.ActiveDocument, "ActiveView", None) if Gui.ActiveDocument else None
+            view = None
+            try:
+                if Gui.ActiveDocument is not None:
+                    view = Gui.ActiveDocument.ActiveView
+            except Exception:
+                view = None
             if view is None:
                 self.skipTest("no active 3D view")
             AF.beginSession()
