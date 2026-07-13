@@ -88,8 +88,8 @@
 ## 4. Среда сборки (Windows)
 
 - Windows, MSVC (Visual Studio 17 2022), x64. Qt6, Coin4, FreeCAD 1.1.1 в **pixi**-окружении.
-- FreeCAD env (pixi): `C:/projects/FreeCAD111/.pixi/envs/default`
-- Проект: `C:\projects\AxisFlowFC`; установка: `%APPDATA%\FreeCAD\v1-1\Mod\AxisFlow\` (путь берётся у FreeCAD; 1.1 версионирует user dir)
+- FreeCAD env (pixi): `C:/projects/FreeCAD111/.pixi/envs/default`; FreeCAD src `…/FreeCAD111/src`, build `…/FreeCAD111/build/release`.
+- Проект: `C:\projects\AxisFlow`; установка: `%APPDATA%\FreeCAD\Mod\AxisFlow\`. Путь берётся у FreeCAD (`getUserAppDataDir()`), не захардкожен; в этой среде разрешается в `…\FreeCAD\Mod\` (без `v1-1` — прежнее предположение про версионированный каталог здесь не подтвердилось). Переопределяется `-DFREECAD_MOD_DIR=...`.
 - Собрать в песочнице ассистента нельзя (нет FreeCAD SDK) — код пишется аккуратно,
   пользователь собирает у себя и присылает ошибки.
 - Добавление/переименование исходников → **чистая реконфигурация** (см. §8).
@@ -122,6 +122,10 @@
   переключает ридаут/ввод **Local ↔ World** (`_worldFrame`); режим орто/радиальный — на `Space`,
   виден по подписям полей (X/Y/Z ↔ D/A). World = те же оси компаса, но от мирового нуля
   (`value_i = localOffset_i + origin·axis_i`); ввод конвертируется обратно в локальный оверрайд.
+  Поведение ввода (AccuDraw): первый символ заменяет живой readout (по полю, а не по устаревшему
+  `_entryField` — иначе после Tab дописывалось); голая магнитуда получает **знак направления**
+  курсора по оси (`signedByDirection`, см. `AxisFlowEntry.h`), явный знак важнее; при потере
+  фокуса значение округляется до принятой точности и нормализуется по единицам (`reformatField`).
 - **AxisFlowTool** (`src/AxisFlowTool.*`) — на один 3D-вид. Владеет компасом. Standalone:
   Coin-колбэк (курсор + клики + клавиши) — это **основа будущего собственного ввода**.
   Adapter: курсор гонит Snapper. **Teardown отложен** (`deleteLater` инструмента и key-фильтра,
@@ -129,7 +133,22 @@
   которым владеет сам инструмент, без use-after-free.
 - **AxisFlowEventFilter** (`src/AxisFlowEventFilter.*`) — глобальный key-filter, нужен **только**
   адаптеру (в собственном инструменте клавиши приходят в Coin-колбэк).
-- **AxisFlowPy** (`src/AxisFlowPy.cpp`) — Python-биндинг, статический `g_session`.
+- **AxisFlowEntry.h** (`src/AxisFlowEntry.h`) — header-only чистая политика ввода без Qt/Coin
+  (`signedByDirection`): знак магнитуды по направлению курсора, явный знак важнее. Вынесено из
+  панели, чтобы покрыть Tier-1 юнит-тестом.
+- **Command.cpp / Workbench** — четыре команды на палитре: `AxisFlow_Activate` (тумблер компаса),
+  `AxisFlow_DrawLine` (запускает демо `axisflow_demo.line()` — точка входа, геометрия в демо),
+  `AxisFlow_ToggleLiveLine` (вкл/выкл живой линии), `AxisFlow_Settings` (окно настроек). У каждой
+  `sPixmap`; иконки — SVG в `Resources/icons/`, грузятся с диска через `addIconPath` (в InitGui),
+  `.qrc` пустой. Значок верстака — `AxisFlow.svg`.
+- **AxisFlowPy** (`src/AxisFlowPy.cpp`) — Python-биндинг, статический `g_session`. Плюс геттеры
+  оверрайдов (`getValueX/Y/Z/Dist/Angle` в солвере, `keyValue(idx)` в сервисе) — их использует
+  `reformatField` для показа знакового значения.
+- **axisflow_settings.py** — живой немодальный диалог настроек (Python/PySide): двухстолбцовый
+  грид имя→значение, редактор по типу (чекбокс/спинбокс/дабл-спинбокс/комбо/кнопка-цвет), приме­
+  нение на лету через `AF.setSetting` (без OK). Расширяется одной строкой в таблице `_SPEC`.
+  Открывается командой `AxisFlow_Settings`. Ограничение: пока открыт, не подхватывает внешние
+  изменения (`changed()` не проброшен в Python), перечитывает при повторном открытии.
 - **axisflow_snap.py** — опциональный Draft-адаптер: оборачивает `Snapper.snap`, зеркалит
   `Snapper.mask` в UI (display-only), продлевает штатную защёлку Draft (`setMouseMode` +
   `mouse_delay_input_start`), выключает наше ограничение (`setConstrainEnabled(False)`).
@@ -161,38 +180,63 @@
 `SmartLock`/`ClearLocks`/`CancelEntry` — без дефолтной клавиши, доступны через API. `setSetting`-имена
 опций: те же, что в таблице, camelCase (`compassSize`, `liveLineEnabled`, `liveLineStyle`, `liveLineColor`, …).
 
+GUI-редактор — `axisflow_settings.py` (команда `AxisFlow_Settings`): двухстолбцовый грид, тип
+поля по значению, применение на лету (см. §5). Все 12 опций из таблицы там представлены; каждая
+завязана на `AF.setSetting`, что шлёт `changed()` → компас/панель обновляются мгновенно.
+
 ## 7. Статус
 
-Готово и проверено: рефактор в сервис; локи осей + направляющая; ребренд AxisFlow; панель с
-редактируемыми полями, кнопкой выключения и переключателем Local/World; компас с настраиваемой
-живой линией; Draft-адаптер; настройки на `ParameterGrp` (§6); `getPoint` с колбэками; демо-линия.
+**Готово и в проекте:**
+- Солвер (орто/полярный, лок осей, smart-lock, keyboard-оверрайды, world↔local, nearestAxis),
+  сервис-синглтон с сигналами, настройки на `ParameterGrp`, карта хоткеев.
+- Компас Coin3D (контур+заливка+точка, квадрат/круг, без Z, поворот к WP, «всегда показывать»,
+  постоянный размер в пикселях) + настраиваемая **живая линия** (вкл/выкл, стиль, цвет).
+- Панель: редактируемые поля с единицами, активное поле по nearestAxis, Tab-цикл, галки лока,
+  «просто печатай», кнопка **Local/World**; ввод AccuDraw — знак по направлению
+  (`AxisFlowEntry.h`), первая цифра заменяет, округление/нормализация единиц при потере фокуса.
+- Инструмент/стейт-машина `Idle/Tracking/Finished`, continue-режим; **Escape = FinishLine**
+  (завершить линию, сессия живёт), **backtick = CancelCommand**; **teardown отложен**
+  (`deleteLater`+`disconnect`), завершать команду безопасно из своего же обработчика.
+- Публичный `getPoint(callback, movecallback, last, continuous, finishcallback)`; мост
+  `GetPointBridge`. Рабочая плоскость подхватывается потребителем (`AF.setPlane` из активной WP).
+- **Палитра**: четыре команды с иконками (`Activate`, `DrawLine`, `ToggleLiveLine`, `Settings`) +
+  значок верстака; **живой диалог настроек** (`axisflow_settings.py`).
+- **Демо-линия** (вне ядра): многосегментная, собственное Coin-превью, транзакции/undo на каждую
+  линию, снятие выделения с готовой линии; Escape — новая линия, backtick — конец.
+- Draft-адаптер (`axisflow_snap.py`).
+- **Автотесты**: Tier 1 — C++ gtest (`tests/`, солвер+хоткеи+`AxisFlowEntry`; gtest компилируется
+  из исходников прямо в раннер, 29 кейсов, `run_tests.bat`/`ctest`, headless); Tier 2 — Python API
+  (`TestAxisFlow.py`, 9 кейсов, гоняется в GUI-FreeCAD `Test.runTestsFromModule`). Оба зелёные.
+  Детали — `TESTING.md`.
+- **Релиз-кит**: `package.xml` (метаданные), `make_release.bat` (сборка ZIP), `RELEASE.md`,
+  `LICENSE` (полный LGPL-2.1), раздел Installation в README.
 
-Сделано в текущей сессии (собрано, тесты у пользователя — см. чеклист вне HANDOFF):
-- живое превью составной линии в демо (собственный Coin-узел; прежний `wireTracker()` падал —
-  его конструктор/`update` ждут Part-wire, не список точек);
-- **teardown** переведён на отложенное уничтожение (`deleteLater` + `disconnect` в `deactivate()`);
-- **рабочая плоскость**: демо синхронизирует активную WP FreeCAD в AxisFlow (`AF.setPlane`);
-- **Escape = FinishLine**: завершает линию, сохраняет её, сессия и панель остаются; инструмент
-  переармируется (`onFinishLine → beginInput`); в мост добавлен `finishcallback`;
-- **живая линия — настройки** (`LiveLineEnabled/Style/Color`) + GUI-команда `AxisFlow_ToggleLiveLine`;
-- **блок A**: кнопка под полями переключает Local ↔ World (ридаут и ввод), режим остаётся на Space;
-- демо снимает выделение с созданной линии и рисует несколько линий подряд (Escape → новая).
-
-Не сделано: полярный лок в решателе (ветка Polar в `getSolvedPoint()` игнорирует `_lock`); лок только
-одноосевой; типизированный абсолютный/относительный ввод сверх пере-axis World-конверсии; `solver()`
-ещё торчит в публичном API; узкий Coin-side teardown (endSession внутри point-callback не-continuous
-потребителя) — демо не задевает.
+**Не сделано / известные хвосты:**
+- Полярный лок в решателе (ветка Polar в `getSolvedPoint()` игнорирует `_lock`); лок одноосевой.
+- Типизированный абсолютный/относительный ввод сверх пере-axis World-конверсии.
+- Докируемая панель (сейчас только плавающее `Qt::Tool`-окно).
+- `solver()` ещё торчит в публичном API (подлежит удалению).
+- Узкий Coin-side teardown: `AF.endSession()` синхронно внутри point-callback не-continuous
+  потребителя делает `unref` Coin-узла на своём стеке (демо не задевает, там Qt-путь).
+- Диалог настроек не подхватывает внешние изменения, пока открыт (перечитывает при переоткрытии).
+- Sketcher.
 
 ## 8. Сборка и установка
 
 ```bat
-cd C:\projects\AxisFlowFC
+cd C:\projects\AxisFlow
 rmdir /s /q build
 cmake -B build -G "Visual Studio 17 2022" -A x64
 cmake --build build --config RelWithDebInfo 2>&1 | findstr /i "error"
 cmake --install build --config RelWithDebInfo
-REM axisflow_snap.py ставится install-ом; путь Mod теперь берётся у FreeCAD
+REM install кладёт .pyd + InitGui/axisflow_*.py + Resources (+ TestAxisFlow.py); Mod-путь у FreeCAD
 ```
+
+Тесты Tier 1: добавить `-DAXISFLOW_BUILD_TESTS=ON` при конфигурации, затем `ctest --test-dir build
+-C RelWithDebInfo --output-on-failure` (нужны pixi-DLL на PATH) — или просто `run_tests.bat`.
+Релизный ZIP: `make_release.bat` (см. `RELEASE.md`). После установки/пересборки — **полный
+перезапуск FreeCAD** (Python-верстак строит тулбар из `self.list` раз за сессию; новая C++-команда
+появляется только со свежей `.pyd`).
 
 ## 9. Ошибки сборки, УЖЕ решённые (не наступать снова)
 
@@ -205,12 +249,12 @@ REM axisflow_snap.py ставится install-ом; путь Mod теперь б
 6. Не-ASCII в runtime-строках: `QLatin1String("\u2014")` на MSVC даёт мусор (UTF-8 байты как
    Latin-1). Использовать `QString(QChar(0x2014))`. Символы без глифа (⏻ U+23FB) — заменять на
    `QStyle::standardIcon`.
-7. **Путь установки.** FreeCAD 1.1 версионирует пользовательский каталог:
-   `%APPDATA%/FreeCAD/v1-1/Mod`, а не `%APPDATA%/FreeCAD/Mod`. Захардкоженный старый путь =
-   модуль ставится туда, где FreeCAD его не ищет: воркбенч не регистрируется, `InitGui.py` не
-   выполняется, `import AxisFlow` даёт `ModuleNotFoundError`, а `Gui.activateWorkbench` —
-   `KeyError`. CMake теперь спрашивает путь у самого FreeCAD (`getUserAppDataDir()`), с фолбэком
-   на `v1-1` и возможностью переопределить `-DFREECAD_MOD_DIR=...`.
+7. **Путь установки — всегда спрашивать у FreeCAD, не хардкодить.** CMake берёт путь через
+   `getUserAppDataDir()` и добавляет `Mod/AxisFlow`. В этой среде он разрешается в
+   `%APPDATA%\FreeCAD\Mod\AxisFlow` (ранее предполагали версионированный `v1-1\Mod` — здесь не
+   подтвердилось). Если поставить не туда, куда смотрит запущенная FreeCAD, воркбенч не
+   регистрируется, `InitGui.py` не выполняется, `import AxisFlow` → `ModuleNotFoundError`,
+   `Gui.activateWorkbench` → `KeyError`. Переопределяется `-DFREECAD_MOD_DIR=...`.
 8. Имя воркбенча для `Gui.activateWorkbench(...)` — **`AxisFlowWorkbenchPy`** (имя класса в
    `InitGui.py`), а не `AxisFlow`/`AxisFlowWorkbench`.
 9a. **Модель фокуса (главное про ввод).** Каретка ВСЕГДА стоит в активном поле панели
@@ -226,6 +270,26 @@ REM axisflow_snap.py ставится install-ом; путь Mod теперь б
    который принимает `QEvent::ShortcutOverride` для «своих» клавиш (тогда `QAction` не срабатывает
    и приходит обычный `KeyPress`) и там же делает работу. То же касается `Space`
    (`Std_ToggleVisibility`).
+10. **GoogleTest на MSVC+pixi: компилировать из исходников, не линковать библиотеку.** Отдельная
+    `gtest.lib` в этой связке (clang-флаги pixi на MSVC-линии) не подхватывалась — `MakeAndRegister­
+    TestInfo` оставался unresolved. Решение: добавить `gtest-all.cc`+`gtest_main.cc` прямо в цель
+    тест-раннера и поставить include gtest первым. Заголовки и определения гарантированно совпадают.
+11. **`InitGui.py`: раздельные globals/locals.** FreeCAD исполняет init-скрипт так, что имена,
+    присвоенные на верхнем уровне (`_icons_dir`), НЕ видны внутри тела класса. Обращение к ним из
+    тела `class Workbench` даёт `NameError`. Ставить такие значения (например `Icon`) на верхнем
+    уровне после `class`, а тело держать литеральным.
+12. **Кнопка на палитре ≠ окно.** Команда живёт в C++ (`Command.cpp`); чтобы кнопка появилась,
+    нужна свежая `.pyd` с зарегистрированной командой И **полный перезапуск** FreeCAD (Python-
+    верстак строит тулбар из `self.list` раз за сессию). Открытие окна из консоли работает и без
+    зарегистрированной команды, поэтому «окно есть, кнопки нет» = не пересобрано/не перезапущено.
+    Отсутствие иконки кнопку НЕ прячет (нерезолвнутый `sPixmap` → кнопка без картинки). Проверка:
+    `"AxisFlow_Settings" in FreeCADGui.listCommands()`.
+13. **Иконки грузятся с диска** через `FreeCADGui.addIconPath(Resources/icons)` в `InitGui.py`;
+    `Resources/AxisFlow.qrc` пустой (плейсхолдер). Имя `sPixmap` должно совпадать с именем SVG без
+    расширения. Новую иконку достаточно положить в `Resources/icons/` (в install попадёт через
+    `install(DIRECTORY Resources ...)`), рекомпиляция не нужна.
+14. **`wireTracker` из Draft не для списка точек.** Его конструктор и `update()` ждут Part-wire
+    (`.Vertexes`), не list Vector — падал молча. В демо превью рисуется собственным Coin-узлом.
 
 ## 10. Известные ограничения
 
@@ -240,6 +304,10 @@ REM axisflow_snap.py ставится install-ом; путь Mod теперь б
   `AF.endSession()`, вызванный синхронно внутри point-callback не-continuous потребителя, всё ещё
   делает `unref` Coin-узла на его собственном стеке. Демо (continuous + отмена через Qt) не задевает.
 - Sketcher не поддержан (свой C++ `DrawSketchHandler`, отдельная большая задача).
+- Диалог настроек (`axisflow_settings.py`) применяет изменения на лету, но пока открыт не
+  подхватывает внешние изменения (например, кнопку «Toggle live line»): `changed()` не проброшен
+  в Python. Перечитывает значения при повторном открытии. Лечится поллингом или пробросом сигнала.
+- Панель только плавающая (`Qt::Tool`); докируемый вариант обсуждён, но не сделан.
 - Draft-адаптер: значение, впечатанное вручную в поле Draft, подчиняется локу Draft, но не нашему;
   это нормально — в адаптере лок и есть Draft'овый.
 
@@ -303,14 +371,21 @@ REM axisflow_snap.py ставится install-ом; путь Mod теперь б
 10. Многоосевой лок (X+Y = плоскостной).
 11. Убрать `solver()` из публичного API; подготовить миграцию синглтон → `AxisFlowSession`.
 12. Sketcher — интеграция через патч `DrawSketchHandler` (большая отдельная задача).
-13. **Значок воркбенча и кнопки** «Activate AxisFlow»: из картинки (PNG/SVG) — иконка в списке
-    верстаков и на кнопке команды. Ресурсы через `.qrc`, `Gui::addIconPath`/`Command::getPixmap`.
-14. **Окно настроек отдельной командой** — GUI-редактор опций (поверх `AxisFlowSettings`),
-    вызывается своей командой. Детали ТЗ — позже.
+13. **Значок воркбенча и кнопки** — ✅ Сделано. Пять SVG в `Resources/icons/` (`AxisFlow` +
+    `Activate`/`DrawLine`/`ToggleLiveLine`/`Settings`), грузятся через `addIconPath`; `sPixmap` у
+    команд, `Icon` у Python-верстака.
+14. **Окно настроек отдельной командой** — ✅ Сделано. `axisflow_settings.py` (команда
+    `AxisFlow_Settings`): двухстолбцовый грид, тип поля по значению, применение на лету без OK.
 15. (Опц.) Экспорт/импорт настроек отдельным XML-пресетом.
 16. (Опц.) Патч в апстрим FreeCAD: апстрим уже двигается в нашу сторону
     (`draftguitools/gui_field_locks.InputFieldLockGroup`, лок полей + ограничение курсора,
     режим Global по `G`). Компас AccuDraw имеет шансы быть принятым.
+17. **Автотесты** — ✅ База. Tier 1 (C++ gtest: солвер, хоткеи, `AxisFlowEntry`) и Tier 2
+    (Python API `TestAxisFlow.py`); см. §13 и `TESTING.md`. Дальше — по мере роста логики
+    добавлять чистые функции + кейсы (GUI-ввод остаётся ручным чеклистом).
+18. **Релиз/дистрибуция** — ✅ База. Компилируемый C++-верстак не идёт в Addon Manager (внешние
+    верстаки должны быть Python-only); распространяем прекомпилированный ZIP через GitHub Releases.
+    См. §14 и `RELEASE.md`.
 
 ## 12. Конвенции
 
@@ -321,4 +396,37 @@ REM axisflow_snap.py ставится install-ом; путь Mod теперь б
 - Q_OBJECT-классы → в `qt6_wrap_cpp(MOC_SOURCES ...)` (AUTOMOC не используется). Классы без
   сигналов/слотов (Hotkeys, EventFilter) в MOC-список не добавлять.
 - Никаких не-ASCII символов в runtime-строках (см. §9.6).
+- Иконки — SVG в `Resources/icons/`, имя = `sPixmap`; грузятся через `addIconPath` (диск), не qrc.
+- Путь Mod — только через FreeCAD (`getUserAppDataDir()`), не хардкодить.
+- Чистую тестируемую логику выносить в header-only без Qt/Coin (пример — `AxisFlowEntry.h`) и
+  крыть Tier-1 gtest. После правок — прогонять `run_tests.bat` до продолжения.
 - Ответы держать сжатыми, прозой, если не просят иначе.
+
+## 13. Тестирование
+
+Три уровня (подробно — `TESTING.md`):
+- **Tier 1 — C++ gtest** (`tests/`): чистая логика (солвер, хоткеи, `AxisFlowEntry`), без FreeCAD и
+  дисплея. gtest компилируется из исходников прямо в раннер (см. §9.10). Запуск: `run_tests.bat`
+  или `-DAXISFLOW_BUILD_TESTS=ON` + `ctest` (pixi-DLL на PATH). 29 кейсов, +1 `DISABLED_`
+  (полярный лок — маркер будущей фичи).
+- **Tier 2 — Python API** (`TestAxisFlow.py`): реальный `.pyd` в GUI-FreeCAD
+  (`import Test, TestAxisFlow; Test.runTestsFromModule(TestAxisFlow)`). Модуль Gui-связан, в
+  `freecadcmd` не импортируется. Недеструктивно (снимок настроек, хоткеи с `persist=False`).
+- **Tier 3 — ручной чеклист**: живой ввод/отрисовка/фокус/тумблеры — GUI, автоматизировать дорого.
+
+## 14. Релиз и распространение
+
+AxisFlow — **компилируемый C++-верстак** (`AxisFlow.pyd`). Addon Manager его не соберёт: внешние
+верстаки в нём обязаны быть Python-only. Официальные пути — хостить прекомпилированные бинарники
+самому либо вливаться в ядро FreeCAD. Выбран первый: **GitHub Releases с готовым ZIP** под
+конкретную версию/платформу FreeCAD.
+
+**ABI-замок:** `.pyd` грузится только в FreeCAD с совпадающими Python/Qt/Coin ABI — собирать против
+той же дистрибуции, что у пользователей, и проверять ZIP на чистой установке. Имя вида
+`AxisFlow-0.1.1-win64-FC1.1.zip`.
+
+Инструменты: `make_release.bat` (собирает рантайм-папку `dist/AxisFlow` — только `.pyd`+`.py`+
+`Resources`+`package.xml`+`LICENSE` — и жмёт ZIP через PowerShell), `package.xml` (метаданные),
+`LICENSE` (полный LGPL-2.1), `RELEASE.md` (чеклист выпуска и инструкция установки), раздел
+Installation в README. Опции на будущее: коммит прекомпилированной `.pyd` в репозиторий для
+Addon-Manager custom-repo (одна платформа/ABI), Windows-инсталлятор (Inno/NSIS).

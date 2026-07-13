@@ -49,11 +49,13 @@ cmake --install build --config RelWithDebInfo
 
 После install файлы окажутся в:
 ```
-%APPDATA%\FreeCAD\Mod\AxisFlow\AxisFlow.dll
+%APPDATA%\FreeCAD\Mod\AxisFlow\AxisFlow.pyd
 %APPDATA%\FreeCAD\Mod\AxisFlow\InitGui.py
+%APPDATA%\FreeCAD\Mod\AxisFlow\axisflow_snap.py, axisflow_demo.py, axisflow_settings.py
+%APPDATA%\FreeCAD\Mod\AxisFlow\Resources\icons\*.svg
 ```
 
-Запусти FreeCAD → выбери верстак AxisFlow → кнопка Activate AxisFlow.
+Запусти FreeCAD → выбери верстак AxisFlow → кнопки Activate / Draw line / Toggle live line / Settings.
 
 ---
 
