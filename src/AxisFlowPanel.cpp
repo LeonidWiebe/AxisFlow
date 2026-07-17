@@ -28,6 +28,16 @@ namespace AxisFlowGui {
 
 static constexpr double NaN = std::numeric_limits<double>::quiet_NaN();
 
+// Format a coordinate value. A value that rounds to zero at this precision is
+// pinned to +0 so the read-out shows a clean "0.000" instead of flickering
+// between "0.000" and "-0.000" as a tiny offset crosses zero.
+static QString fmtCoord(double v, int decimals)
+{
+    if (std::abs(v) < 0.5 * std::pow(10.0, -decimals))
+        v = 0.0;
+    return QString::number(v, 'f', decimals);
+}
+
 AxisFlowPanel* AxisFlowPanel::instance()
 {
     static AxisFlowPanel* inst = nullptr;
@@ -127,7 +137,9 @@ void AxisFlowPanel::wireToService()
     connect(_frameBtn, &QPushButton::clicked, this, [this](bool){
         _worldFrame = !_worldFrame;
         updateFrameButton();
-        AxisFlowService::instance().refreshCursor();   // redraw fields in the new frame
+        // Tell the service which frame we are in: indexing runs only in Local.
+        // setLocalFrame() re-solves and redraws the fields in the new frame.
+        AxisFlowService::instance().setLocalFrame(!_worldFrame);
     });
 
     // Lock checkboxes -> service. 'clicked' fires only on user interaction, so
@@ -175,6 +187,8 @@ void AxisFlowPanel::wireToService()
             });
 
     // Initial sync.
+    updateFrameButton();
+    AxisFlowService::instance().setLocalFrame(!_worldFrame);   // default: Local
     refreshActiveHighlight();
     onServiceState();
 }
@@ -191,9 +205,9 @@ void AxisFlowPanel::setValues(double x, double y, double z)
         // gating on it would freeze the live read-out under the blinking caret.
         return s.hasKeyValue(i) || i == _entryField;
     };
-    if (!held(0)) _editA->setText(QString::number(x, 'f', 4));
-    if (!held(1)) _editB->setText(QString::number(y, 'f', 4));
-    if (!held(2)) _editC->setText(QString::number(z, 'f', 4));
+    if (!held(0)) _editA->setText(fmtCoord(x, 4));
+    if (!held(1)) _editB->setText(fmtCoord(y, 4));
+    if (!held(2)) _editC->setText(fmtCoord(z, 4));
 }
 
 void AxisFlowPanel::setValuesDist(double dist, double angle)
@@ -202,8 +216,8 @@ void AxisFlowPanel::setValuesDist(double dist, double angle)
     auto held = [&](int i) {
         return s.hasKeyValue(i) || i == _entryField;
     };
-    if (!held(0)) _editA->setText(QString::number(dist, 'f', 4));
-    if (!held(1)) _editB->setText(QString::number(angle, 'f', 2));
+    if (!held(0)) _editA->setText(fmtCoord(dist, 4));
+    if (!held(1)) _editB->setText(fmtCoord(angle, 2));
 }
 
 void AxisFlowPanel::setMode(bool polar)
@@ -354,7 +368,7 @@ void AxisFlowPanel::reformatField(int index)
                                          : o.Dot(s.planeNormal());
         disp += proj;                         // local -> world for display
     }
-    const QString formatted = QString::number(disp, 'f', fieldDecimals(index));
+    const QString formatted = fmtCoord(disp, fieldDecimals(index));
     if (formatted != edit->text())
         edit->setText(formatted);   // programmatic: no textEdited, no re-push
 }
@@ -715,12 +729,31 @@ void AxisFlowPanel::onCursorMoved(Base::Vector3d /*solved*/)
     updateActiveFieldFromCursor();
 
     AxisFlowService& s = AxisFlowService::instance();
+
+    // While a candidate is active, the point that will actually be placed is the
+    // SNAPPED one, so mirror it in the fields instead of the raw cursor:
+    //   candidate point -> length snapped to the indexed distance;
+    //   candidate axis  -> perpendicular component zeroed (the off-axis field
+    //                      reads 0.000, matching the point on the axis).
+    // currentIndexing() carries the snapped local offset (lx,ly,lz). When no
+    // candidate is active the read-out behaves as usual (raw cursor).
+    const IndexingResult ix = s.currentIndexing();
+    const bool snapped = ix.distanceActive || ix.axisActive;
+
     if (s.mode() == CompassMode::Polar) {
-        // Polar is inherently a relative distance/angle; the frame toggle only
-        // affects the rectangular read-out.
-        setValuesDist(s.distance(), s.angleDeg());
+        if (snapped) {
+            const double dist  = std::sqrt(ix.lx * ix.lx + ix.ly * ix.ly);
+            const double angle = std::atan2(ix.ly, ix.lx) * 180.0 / M_PI;
+            setValuesDist(dist, angle);
+        } else {
+            // Polar is inherently a relative distance/angle; the frame toggle
+            // only affects the rectangular read-out.
+            setValuesDist(s.distance(), s.angleDeg());
+        }
     } else {
-        Base::Vector3d l = s.localOffset();
+        const Base::Vector3d l = snapped
+            ? Base::Vector3d(ix.lx, ix.ly, ix.lz)   // snapped candidate point/axis
+            : s.localOffset();                       // raw cursor
         if (_worldFrame) {
             // Same compass axes, but measured from the world origin instead of
             // the compass origin: value_i = localOffset_i + origin . axis_i.

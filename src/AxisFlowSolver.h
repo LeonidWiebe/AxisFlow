@@ -3,6 +3,11 @@
 #include <Base/Vector3D.h>
 #include <Base/Matrix.h>
 
+#include <cmath>
+#include <limits>
+
+#include "AxisFlowIndexing.h"   // IndexingResult / IndexingInput (pure header)
+
 namespace AxisFlowGui {
 
 /** Which axis (or none) is currently locked */
@@ -85,8 +90,34 @@ public:
     void clearValueDist();
     void clearValueAngle();
 
+    // ----- live-line indexing (local frame only) -----
+    /** Enable/disable the two indexing kinds (from settings). */
+    void setUseDistanceIndexing(bool on) { _useDistIdx = on; }
+    void setUseAxisIndexing(bool on)     { _useAxisIdx = on; }
+    /** Indexing tolerance in screen pixels (0..50). */
+    void setIndexTolerancePx(int px)     { _tolPx = px; }
+    /** World units per screen pixel (from the camera); <=0 disables indexing. */
+    void setViewScale(double worldPerPixel) { _worldPerPixel = (worldPerPixel > 0.0) ? worldPerPixel : 0.0; }
+    /** Indexing runs only in the local frame; the panel pushes this. */
+    void setLocalFrame(bool local)       { _localFrame = local; }
+
+    /** Remembered length that distance-indexing snaps to (magnitude). */
+    void setIndexedDistance(double d)    { _indexedDistance = std::isnan(d) ? d : std::fabs(d); }
+    void clearIndexedDistance()          { _indexedDistance = std::numeric_limits<double>::quiet_NaN(); }
+    double indexedDistance() const       { return _indexedDistance; }
+    bool   hasIndexedDistance() const    { return !std::isnan(_indexedDistance); }
+
+    bool   useDistanceIndexing() const   { return _useDistIdx; }
+    bool   useAxisIndexing() const       { return _useAxisIdx; }
+    int    indexTolerancePx() const      { return _tolPx; }
+    double viewScale() const             { return _worldPerPixel; }
+    bool   localFrame() const            { return _localFrame; }
+
+    /** Current indexing decision, derived from the solved local offset. */
+    IndexingResult indexing() const;
+
     // ----- output -----
-    /** Final snapped point in world space. */
+    /** Final snapped point in world space (indexing applied). */
     Base::Vector3d getSolvedPoint() const;
 
     /** Offset from origin in compass-local space. */
@@ -124,7 +155,18 @@ private:
     double _kX, _kY, _kZ;
     double _kDist, _kAngle;
 
+    // live-line indexing
+    bool   _useDistIdx     { false };
+    bool   _useAxisIdx     { false };
+    int    _tolPx          { 0 };
+    double _worldPerPixel  { 0.0 };   // <=0 => indexing disabled (no camera yet)
+    bool   _localFrame     { true };
+    double _indexedDistance;          // NaN = none (set in ctor)
+
     void clearKeyboardValues();
+
+    /** Solved local offset after overrides / lock / polar, BEFORE indexing. */
+    Base::Vector3d solvedLocalBase() const;
 };
 
 } // namespace AxisFlowGui

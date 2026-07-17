@@ -58,8 +58,18 @@ public:
     void setCursorPoint(const SbVec3f& pt);
 
     /** Style the live guide line: on/off, pattern (0 solid,1 dash,2 dot,3 dash-dot),
-     *  colour 0xRRGGBBAA. */
-    void applyGuideStyle(bool enabled, int style, unsigned long rgba);
+     *  colour 0xRRGGBBAA, transparency 0 opaque .. 1 invisible. */
+    void applyGuideStyle(bool enabled, int style, unsigned long rgba, double transparency);
+
+    /** Style the candidate-axis line (own weight + transparency; colour and
+     *  pattern are inherited from the live line via applySettings()). */
+    void applyCandidateAxisStyle(int weightPx, double transparency);
+
+    /** Drive the indexing markers computed by the solver:
+     *   distanceActive -> show the candidate point at the live-line end;
+     *   axisActive     -> hide the live line and show the candidate-axis line.
+     */
+    void setIndexingCandidates(bool distanceActive, bool axisActive);
 
     /** Centre-to-contour distance, in world units. */
     void setRadius(float worldRadius);
@@ -116,13 +126,33 @@ private:
     SoCoordinate3* _coordY     { nullptr };
     SoLineSet*     _lineY      { nullptr };
 
-    // Guide line.
+    // Guide line (live line).
     SoSeparator*   _guideSep   { nullptr };
-    SoBaseColor*   _colorGuide { nullptr };
+    SoMaterial*    _matGuide   { nullptr };   // colour + transparency
     SoCoordinate3* _coordGuide { nullptr };
     SoLineSet*     _lineGuide  { nullptr };
     SoDrawStyle*   _styleGuide { nullptr };
     bool           _guideEnabled { true };
+
+    // Candidate axis: replaces the live line while axis-indexing snaps. Same
+    // colour + pattern as the live line, own weight + transparency.
+    SoSwitch*      _axisCandSwitch { nullptr };
+    SoMaterial*    _matAxisCand    { nullptr };
+    SoDrawStyle*   _styleAxisCand  { nullptr };
+    SoCoordinate3* _coordAxisCand  { nullptr };
+    SoLineSet*     _lineAxisCand   { nullptr };
+
+    // Candidate point: a prominent dot at the live-line end, shown while
+    // distance-indexing snaps. Same size as the centre dot.
+    SoSwitch*      _candDotSwitch { nullptr };
+    SoBaseColor*   _candDotColor  { nullptr };
+    SoDrawStyle*   _candDotStyle  { nullptr };
+    SoCoordinate3* _candDotCoord  { nullptr };
+    SoPointSet*    _candDot       { nullptr };
+
+    bool           _distCandActive { false };
+    bool           _axisCandActive { false };
+    SbVec3f        _localEnd { 0, 0, 0 };   // live-line end, compass-local
 
     float   _radius  { 50.0f };
     bool    _visible { true };

@@ -26,11 +26,13 @@ vice-versa. Therefore:
   (state exactly which one), and
 - **test the ZIP on a clean install** of that FreeCAD before publishing.
 
-Name releases accordingly, e.g. `AxisFlow-0.1.1-win64-FC1.1.zip`.
+Name releases accordingly, e.g. `AxisFlow-0.1.2-win64-FC1.1.zip`.
 
 ## Cutting a release (maintainer)
 
-1. Bump `<version>`/`<date>` in `package.xml` (and `VERSION` in `make_release.bat`).
+1. Bump `<version>`/`<date>` in `package.xml` (and `VERSION` in `make_release.bat`,
+   the project version in `CMakeLists.txt`). Move the `[Unreleased]` notes in
+   `CHANGELOG.md` under a new dated version heading and update the compare links.
 2. Build + run the tests once (`run_tests.bat`).
 3. Build the module and package it:
    ```bat
@@ -41,7 +43,7 @@ Name releases accordingly, e.g. `AxisFlow-0.1.1-win64-FC1.1.zip`.
    `AxisFlow\` folder with the runtime files only (the `.pyd`, the `.py` glue,
    `Resources\`, `package.xml`) — no sources, tests, or build artifacts.
 4. Test the ZIP on a clean FreeCAD (unzip into `Mod`, restart, use it).
-5. On GitHub: create a **tag** (e.g. `v0.1.1`) and a **Release**, attach the ZIP,
+5. On GitHub: create a **tag** (e.g. `v0.1.2`) and a **Release**, attach the ZIP,
    paste install instructions + which FreeCAD build it targets.
 
 ## Installing (end users)
@@ -66,8 +68,28 @@ release built for your FreeCAD version.
   into the repo alongside the `.py`/`Resources`, matching users get a one-click
   install. It only works for that one platform/ABI, so keep the ZIP as the main
   channel.
-- **Windows installer** (Inno Setup / NSIS): nicer UX than a raw ZIP; drops the
-  files into `Mod\AxisFlow` and can detect the FreeCAD path. More setup work.
+- **Windows installer (NSIS)**: nicer UX than a raw ZIP. Build it with
+  `build_installer.bat` (needs [NSIS](https://nsis.sourceforge.io) on PATH); it
+  stages the runtime files via `stage_dist.bat` and compiles
+  `installer\AxisFlow.nsi` into `AxisFlow-<version>-win64-FC1.1-setup.exe`. The
+  installer is **per-user** (no admin): it installs into the FreeCAD `Mod`
+  folder (auto-detecting the versioned `...\FreeCAD\v1-1\Mod` when present, with
+  a directory page to override), registers an uninstaller in *Apps & features*
+  under `HKCU`, and ships **only** the workbench files (Qt/Coin/Python come from
+  FreeCAD). The same ABI rule applies -- build against the target FreeCAD and
+  test the `setup.exe` on a clean install.
+- **Linux (prebuilt tarball + one-liner)**: `stage_dist.sh` builds the module and
+  packages `AxisFlow-1_1-linux-<arch>-FC1.1.tar.gz` plus `SHA256SUMS.txt`. Upload
+  both to the GitHub Release (tag `v<version>`). Users install with one command,
+  `curl -fsSL …/install.sh | bash`, which detects their FreeCAD, **refuses** to
+  install on a non-1.1.x FreeCAD (unless `--force`), verifies the checksum and
+  drops the workbench into their Mod folder. The tarball asset name is stable (no
+  app version) so `install.sh` can fetch it from the *latest* release; the version
+  lives in the tag and in `package.xml`.
+  Prerequisite: the current `CMakeLists.txt` is Windows-only — it must be made
+  cross-platform (find FreeCAD/Qt/Coin, emit a prefix-less `AxisFlow.so`) before
+  `stage_dist.sh` can build the Linux binary. Flatpak/Snap FreeCAD are out of
+  scope for a prebuilt (their `.so` must be built inside their SDK/runtime).
 - **LICENSE**: `package.xml` references a `LICENSE` file. Easiest is to let
   GitHub add it when creating the repo (choose *LGPL-2.1*), or drop the official
   LGPL-2.1 text into `LICENSE`.

@@ -101,6 +101,9 @@ void AxisFlowTool::activate(bool withPositionSource)
 
     AxisFlowService::instance().activate();
 
+    // Pull indexing enable flags + tolerance from settings into the solver.
+    AxisFlowService::instance().applyIndexingSettings();
+
     // First paint: orient to the working plane, size to the pixel setting and
     // apply "always show compass" before anything moves.
     syncCompassPlane();
@@ -175,6 +178,9 @@ void AxisFlowTool::handleCoinEvent(SoEventCallback* node)
         const auto* me = static_cast<const SoLocation2Event*>(event);
         SbVec3f worldPt = unprojectToCompassPlane(me->getPosition());
         Base::Vector3d raw(worldPt[0], worldPt[1], worldPt[2]);
+        // Push the current pixel scale first, so indexing's pixel tolerances are
+        // evaluated against THIS frame's zoom during the solve below.
+        AxisFlowService::instance().setViewScale(computeWorldPerPixel());
         AxisFlowService::instance().updateCursor(raw, nullptr);   // -> cursorMoved
         node->setHandled();
         return;
@@ -346,25 +352,25 @@ void AxisFlowTool::syncCompassPlane()
                        SbVec3f(float(n.x), float(n.y), float(n.z)));
 }
 
-void AxisFlowTool::syncCompassSize()
+float AxisFlowTool::computeWorldPerPixel()
 {
     // The setting is in PIXELS, the scene graph works in world units, so the
     // conversion needs the camera. Perspective cameras additionally depend on
     // the distance to the compass, hence the recompute on every cursor move.
-    if (!_view) return;
+    if (!_view) return 0.0f;
 
     Gui::View3DInventorViewer* viewer = _view->getViewer();
-    if (!viewer) return;
+    if (!viewer) return 0.0f;
 
     SoRenderManager* rm = viewer->getSoRenderManager();
-    if (!rm) return;
+    if (!rm) return 0.0f;
 
     SoCamera* cam = rm->getCamera();
-    if (!cam) return;
+    if (!cam) return 0.0f;
 
     const SbVec2s vpPix = rm->getViewportRegion().getViewportSizePixels();
     const int hPix = vpPix[1];
-    if (hPix <= 0) return;
+    if (hPix <= 0) return 0.0f;
 
     float worldHeight = 0.0f;
     if (cam->isOfType(SoOrthographicCamera::getClassTypeId())) {
@@ -378,20 +384,42 @@ void AxisFlowTool::syncCompassSize()
         worldHeight = 2.0f * dist * std::tan(pc->heightAngle.getValue() * 0.5f);
     }
     else {
-        return;   // unknown camera type: leave the last radius alone
+        return 0.0f;   // unknown camera type
     }
 
-    const float worldPerPixel = worldHeight / float(hPix);
+    return worldHeight / float(hPix);
+}
+
+void AxisFlowTool::syncCompassSize()
+{
+    const float worldPerPixel = computeWorldPerPixel();
+    if (worldPerPixel <= 0.0f) return;   // no camera yet: leave the last radius
+
+    // Feed the pixel scale to the service so indexing tolerances (also in
+    // pixels) track zoom. Silent setter -- no re-emit, so this cannot recurse.
+    AxisFlowService::instance().setViewScale(worldPerPixel);
+
     const int sizePx = AxisFlowSettings::instance().compassSizePx();
     _compass->setRadius(0.5f * float(sizePx) * worldPerPixel);
+}
+
+void AxisFlowTool::refreshIndexingCandidates()
+{
+    if (!_compass) return;
+    const IndexingResult r = AxisFlowService::instance().currentIndexing();
+    _compass->setIndexingCandidates(r.distanceActive, r.axisActive);
 }
 
 void AxisFlowTool::onSettingsChanged()
 {
     if (!_compass) return;
     _compass->applySettings();
+    // Enable flags / tolerance drive the solver; push them, then re-evaluate
+    // the candidate state at the current cursor.
+    AxisFlowService::instance().applyIndexingSettings();
     syncCompassSize();
     updateCompassVisibility();
+    refreshIndexingCandidates();
 }
 
 void AxisFlowTool::updateCompassVisibility()
@@ -405,7 +433,12 @@ void AxisFlowTool::updateCompassVisibility()
 
 void AxisFlowTool::cameraChangedCB(void* userData, SoSensor*)
 {
-    static_cast<AxisFlowTool*>(userData)->syncCompassSize();
+    auto* self = static_cast<AxisFlowTool*>(userData);
+    self->syncCompassSize();
+    // Zoom changes the pixel value of a fixed world offset, so the indexing
+    // decision can flip with no mouse motion. Re-solve + re-broadcast; the
+    // silent setViewScale above means this does not recurse.
+    AxisFlowService::instance().refreshCursor();
 }
 
 void AxisFlowTool::attachCameraSensor()
@@ -461,6 +494,10 @@ void AxisFlowTool::onCursorMoved(Base::Vector3d solved)
     // Keeps the compass a constant size on screen through zoom and, for a
     // perspective camera, through changes of distance.
     syncCompassSize();
+
+    // Indexing candidate markers (candidate point / candidate axis) follow the
+    // solved point; the solver already snapped 'solved' when either is active.
+    refreshIndexingCandidates();
 }
 
 void AxisFlowTool::onServiceStateChanged()

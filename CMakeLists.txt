@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(AxisFlow VERSION 0.1.0 LANGUAGES CXX)
+project(AxisFlow VERSION 0.1.2 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -20,6 +20,11 @@ set(FREECAD_BUILD "C:/projects/FreeCAD111/build/release"
 # ---------------------------------------------------------------------------
 set(Qt6_DIR "${PIXI_ENV}/lib/cmake/Qt6")
 find_package(Qt6 REQUIRED COMPONENTS Core Widgets OpenGL)
+
+# OpenGL: the compass enables point antialiasing with raw gl* calls
+# (glEnable/glBlendFunc/glPushAttrib...) for round dots. <Inventor/system/gl.h>
+# only declares them; the symbols live in opengl32 on Windows.
+find_package(OpenGL REQUIRED)
 
 # ---------------------------------------------------------------------------
 # Coin4
@@ -99,6 +104,7 @@ set(HEADERS
     src/AxisFlowService.h
     src/AxisFlowHotkeys.h
     src/AxisFlowSolver.h
+    src/AxisFlowIndexing.h
     src/AxisFlowCompass.h
     src/AxisFlowPanel.h
     src/AxisFlowEventFilter.h
@@ -138,6 +144,7 @@ target_link_libraries(AxisFlow PRIVATE
     Qt6::Core
     Qt6::Widgets
     Qt6::OpenGL
+    OpenGL::GL
     ${COIN4_LIB}
     ${FREECAD_LIBRARIES}
     ${Python3_LIBRARIES}
@@ -225,6 +232,7 @@ install(DIRECTORY Resources     DESTINATION "${FREECAD_MOD_DIR}")
 
 message(STATUS "=== AxisFlow build config ===")
 message(STATUS "  Qt6 dir     : ${Qt6_DIR}")
+message(STATUS "  OpenGL lib  : ${OPENGL_gl_LIBRARY}")
 message(STATUS "  Coin4 lib   : ${COIN4_LIB}")
 message(STATUS "  FreeCAD src : ${FREECAD_SRC}")
 message(STATUS "  FreeCAD libs: ${FREECAD_LIBRARIES}")

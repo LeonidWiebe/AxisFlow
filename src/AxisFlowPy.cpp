@@ -217,6 +217,21 @@ PyObject* axisflow_clearKeyValues(PyObject*, PyObject*)
     Py_RETURN_NONE;
 }
 
+PyObject* axisflow_setIndexedDistance(PyObject*, PyObject* args)
+{
+    double d = 0.0;
+    if (!PyArg_ParseTuple(args, "d", &d))
+        return nullptr;
+    AxisFlowService::instance().setIndexedDistance(d);
+    Py_RETURN_NONE;
+}
+
+PyObject* axisflow_clearIndexedDistance(PyObject*, PyObject*)
+{
+    AxisFlowService::instance().clearIndexedDistance();
+    Py_RETURN_NONE;
+}
+
 PyObject* axisflow_getState(PyObject*, PyObject*)
 {
     AxisFlowService& svc = AxisFlowService::instance();
@@ -237,6 +252,12 @@ PyObject* axisflow_getState(PyObject*, PyObject*)
         d.setItem("planeNormal", Py::Vector(svc.planeNormal()));
         d.setItem("distance",    Py::Float(svc.distance()));
         d.setItem("angle",       Py::Float(svc.angleDeg()));
+        d.setItem("indexedDistance",
+                  svc.hasIndexedDistance() ? Py::Object(Py::Float(svc.indexedDistance()))
+                                           : Py::Object(Py::None()));
+        const IndexingResult ix = svc.currentIndexing();
+        d.setItem("indexCandidatePoint", Py::Boolean(ix.distanceActive));
+        d.setItem("indexCandidateAxis",  Py::Boolean(ix.axisActive));
         return Py::new_reference_to(d);
     }
     catch (Py::Exception&) {
@@ -423,6 +444,12 @@ PyObject* axisflow_getSettings(PyObject*, PyObject*)
     setItem("liveLineEnabled",  PyBool_FromLong(s.liveLineEnabled() ? 1 : 0));
     setItem("liveLineStyle",    PyLong_FromLong(s.liveLineStyle()));
     setItem("liveLineColor",    PyLong_FromUnsignedLong(s.liveLineColor()));
+    setItem("useDistanceIndexing", PyBool_FromLong(s.useDistanceIndexing() ? 1 : 0));
+    setItem("useAxesIndexing",     PyBool_FromLong(s.useAxesIndexing() ? 1 : 0));
+    setItem("indexingTolerance",   PyLong_FromLong(s.indexingTolerance()));
+    setItem("liveLineTransparency", PyFloat_FromDouble(s.liveLineTransparency()));
+    setItem("indexingAxisWeight",  PyLong_FromLong(s.indexingAxisWeight()));
+    setItem("indexingAxisTransparency", PyFloat_FromDouble(s.indexingAxisTransparency()));
 
     // Hotkeys as {'SmartLock': [16777220, 16777221], ...}; [] means unbound.
     PyObject* hk = PyDict_New();
@@ -467,6 +494,12 @@ PyObject* axisflow_setSetting(PyObject*, PyObject* args)
     else if (k == "liveLineEnabled")   s.setLiveLineEnabled(PyObject_IsTrue(val) == 1);
     else if (k == "liveLineStyle")     s.setLiveLineStyle(static_cast<int>(PyLong_AsLong(val)));
     else if (k == "liveLineColor")     s.setLiveLineColor(PyLong_AsUnsignedLong(val));
+    else if (k == "useDistanceIndexing") s.setUseDistanceIndexing(PyObject_IsTrue(val) == 1);
+    else if (k == "useAxesIndexing")     s.setUseAxesIndexing(PyObject_IsTrue(val) == 1);
+    else if (k == "indexingTolerance")   s.setIndexingTolerance(static_cast<int>(PyLong_AsLong(val)));
+    else if (k == "liveLineTransparency") s.setLiveLineTransparency(PyFloat_AsDouble(val));
+    else if (k == "indexingAxisWeight")  s.setIndexingAxisWeight(static_cast<int>(PyLong_AsLong(val)));
+    else if (k == "indexingAxisTransparency") s.setIndexingAxisTransparency(PyFloat_AsDouble(val));
     else {
         PyErr_Format(PyExc_KeyError, "unknown AxisFlow setting: %s", k.c_str());
         return nullptr;
@@ -576,6 +609,10 @@ PyMethodDef AxisFlowMethods[] = {
      "setKeyValue(field, value). rect: 0=X 1=Y 2=Z ; polar: 0=dist 1=angle 2=Z."},
     {"clearKeyValues", axisflow_clearKeyValues, METH_NOARGS,
      "clearKeyValues(). Clear keyboard override values."},
+    {"setIndexedDistance", axisflow_setIndexedDistance, METH_VARARGS,
+     "setIndexedDistance(length). Remember a length for distance indexing to snap to."},
+    {"clearIndexedDistance", axisflow_clearIndexedDistance, METH_NOARGS,
+     "clearIndexedDistance(). Forget the remembered indexing length."},
     {"getState",       axisflow_getState,       METH_NOARGS,
      "getState() -> dict. Snapshot of the current AxisFlow state."},
     {"getSettings",    axisflow_getSettings,    METH_NOARGS,
@@ -583,7 +620,9 @@ PyMethodDef AxisFlowMethods[] = {
     {"setSetting",     axisflow_setSetting,     METH_VARARGS,
      "setSetting(name, value). name in {compassSize, axisThickness, axisStartPct, "
      "axisLengthPct, axisColorX, axisColorY, activeFieldColor, fillTransparency, "
-     "alwaysShowCompass, liveLineEnabled, liveLineStyle, liveLineColor}."},
+     "alwaysShowCompass, liveLineEnabled, liveLineStyle, liveLineColor, "
+     "liveLineTransparency, useDistanceIndexing, useAxesIndexing, indexingTolerance, "
+     "indexingAxisWeight, indexingAxisTransparency}."},
     {"resetSettings",  axisflow_resetSettings,  METH_NOARGS,
      "resetSettings(). Restore built-in defaults (options and hotkeys)."},
     {"loadHotkeysFromSettings", axisflow_loadHotkeysFromSettings, METH_NOARGS,

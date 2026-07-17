@@ -15,18 +15,32 @@ namespace {
 const char* kPath = "User parameter:BaseApp/Preferences/Mod/AxisFlow";
 
 // Defaults kept in one place so load() and resetDefaults() cannot drift apart.
-constexpr int    kDefCompassSize   = 120;
-constexpr int    kDefAxisThickness = 2;
-constexpr double kDefAxisStartPct  = 0.15;
-constexpr double kDefAxisLengthPct = 0.70;
+constexpr int    kDefCompassSize   = 100;
+constexpr int    kDefAxisThickness = 4;
+constexpr double kDefAxisStartPct  = 0.80;
+constexpr double kDefAxisLengthPct = 0.35;
 constexpr unsigned long kDefColorX = 0xFF0000FFul;   // red
 constexpr unsigned long kDefColorY = 0x00FF00FFul;   // green
 constexpr unsigned long kDefActiveField = 0xDCDCDCFFul;   // a touch darker than a plain field
 constexpr double kDefFillTransp    = 0.65;
 constexpr bool   kDefAlwaysShow    = false;
-constexpr bool          kDefLiveLineEnabled = true;
-constexpr int           kDefLiveLineStyle   = 1;   // dashed
-constexpr unsigned long kDefLiveLineColor   = 0xFFE633FFul;
+constexpr bool          kDefLiveLineEnabled = false;
+constexpr int           kDefLiveLineStyle   = 0;   // solid
+constexpr unsigned long kDefLiveLineColor   = 0x00AAFFFFul;   // cyan-blue
+
+constexpr bool   kDefUseDistIdx     = true;
+constexpr bool   kDefUseAxesIdx     = true;
+constexpr int    kDefIndexTol       = 15;     // pixels
+constexpr double kDefLiveLineTransp = 0.50;
+constexpr int    kDefIdxAxisWeight  = 8;      // pixels
+constexpr double kDefIdxAxisTransp  = 0.50;
+
+int clampTol(int v)
+{
+    if (v < 0)  v = 0;
+    if (v > 50) v = 50;
+    return v;
+}
 
 double clamp01(double v)
 {
@@ -72,6 +86,14 @@ void AxisFlowSettings::load()
     _liveLineColor     = g->GetUnsigned("LiveLineColor", kDefLiveLineColor);
     if (_liveLineStyle < 0 || _liveLineStyle > 3) _liveLineStyle = kDefLiveLineStyle;
 
+    _useDistanceIndexing = g->GetBool("UseDistanceIndexing", kDefUseDistIdx);
+    _useAxesIndexing     = g->GetBool("UseAxesIndexing", kDefUseAxesIdx);
+    _indexingTolerance   = clampTol(static_cast<int>(g->GetInt("IndexingTolerance", kDefIndexTol)));
+    _liveLineTransparency = clamp01(g->GetFloat("LiveLineTransparency", kDefLiveLineTransp));
+    _indexingAxisWeight  = static_cast<int>(g->GetInt("IndexingAxisWeight", kDefIdxAxisWeight));
+    _indexingAxisTransparency = clamp01(g->GetFloat("IndexingAxisTransparency", kDefIdxAxisTransp));
+    if (_indexingAxisWeight < 1) _indexingAxisWeight = kDefIdxAxisWeight;
+
     // Guard against a nonsensical stored size; a zero-size compass is invisible
     // and looks like a bug rather than a setting.
     if (_compassSizePx   < 8) _compassSizePx   = kDefCompassSize;
@@ -96,6 +118,13 @@ void AxisFlowSettings::save()
     g->SetBool("LiveLineEnabled", _liveLineEnabled);
     g->SetInt("LiveLineStyle", _liveLineStyle);
     g->SetUnsigned("LiveLineColor", _liveLineColor);
+
+    g->SetBool("UseDistanceIndexing", _useDistanceIndexing);
+    g->SetBool("UseAxesIndexing", _useAxesIndexing);
+    g->SetInt("IndexingTolerance", _indexingTolerance);
+    g->SetFloat("LiveLineTransparency", _liveLineTransparency);
+    g->SetInt("IndexingAxisWeight", _indexingAxisWeight);
+    g->SetFloat("IndexingAxisTransparency", _indexingAxisTransparency);
 }
 
 void AxisFlowSettings::resetDefaults()
@@ -112,6 +141,12 @@ void AxisFlowSettings::resetDefaults()
     _liveLineEnabled   = kDefLiveLineEnabled;
     _liveLineStyle     = kDefLiveLineStyle;
     _liveLineColor     = kDefLiveLineColor;
+    _useDistanceIndexing = kDefUseDistIdx;
+    _useAxesIndexing     = kDefUseAxesIdx;
+    _indexingTolerance   = kDefIndexTol;
+    _liveLineTransparency = kDefLiveLineTransp;
+    _indexingAxisWeight  = kDefIdxAxisWeight;
+    _indexingAxisTransparency = kDefIdxAxisTransp;
     save();
 
     // Hotkeys: drop the stored overrides so the built-in layout applies again.
@@ -226,6 +261,58 @@ void AxisFlowSettings::setLiveLineColor(unsigned long rgba)
     if (rgba == _liveLineColor) return;
     _liveLineColor = rgba;
     group()->SetUnsigned("LiveLineColor", rgba);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setUseDistanceIndexing(bool v)
+{
+    if (v == _useDistanceIndexing) return;
+    _useDistanceIndexing = v;
+    group()->SetBool("UseDistanceIndexing", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setUseAxesIndexing(bool v)
+{
+    if (v == _useAxesIndexing) return;
+    _useAxesIndexing = v;
+    group()->SetBool("UseAxesIndexing", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setIndexingTolerance(int v)
+{
+    v = clampTol(v);
+    if (v == _indexingTolerance) return;
+    _indexingTolerance = v;
+    group()->SetInt("IndexingTolerance", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setLiveLineTransparency(double v)
+{
+    v = clamp01(v);
+    if (v == _liveLineTransparency) return;
+    _liveLineTransparency = v;
+    group()->SetFloat("LiveLineTransparency", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setIndexingAxisWeight(int v)
+{
+    v = std::max(1, v);
+    if (v == _indexingAxisWeight) return;
+    _indexingAxisWeight = v;
+    group()->SetInt("IndexingAxisWeight", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setIndexingAxisTransparency(double v)
+{
+    v = clamp01(v);
+    if (v == _indexingAxisTransparency) return;
+    _indexingAxisTransparency = v;
+    group()->SetFloat("IndexingAxisTransparency", v);
     Q_EMIT changed();
 }
 

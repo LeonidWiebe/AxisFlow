@@ -162,6 +162,30 @@ public:
     void refreshCursor();
 
     // ---------------------------------------------------------------------
+    // Live-line indexing (settings-driven; local frame only)
+    // ---------------------------------------------------------------------
+    /** Pull the indexing enable flags + tolerance out of AxisFlowSettings into
+     *  the solver. Called on activation and whenever settings change. */
+    void applyIndexingSettings();
+
+    /** World units per screen pixel (from the camera). Stored silently -- it is
+     *  pushed on every mouse move, so it must NOT re-emit (that would recurse
+     *  through the tool's syncCompassSize). */
+    void setViewScale(double worldPerPixel);
+
+    /** The panel's Local/World frame. Indexing runs only in the local frame. */
+    void setLocalFrame(bool local);
+
+    /** The remembered length distance-indexing snaps to (magnitude kept). */
+    void setIndexedDistance(double d);
+    void clearIndexedDistance();
+    double indexedDistance() const   { return _solver.indexedDistance(); }
+    bool   hasIndexedDistance() const { return _solver.hasIndexedDistance(); }
+
+    /** The current indexing decision (candidate point / candidate axis). */
+    IndexingResult currentIndexing() const { return _solver.indexing(); }
+
+    // ---------------------------------------------------------------------
     // State getters
     // ---------------------------------------------------------------------
     CompassMode    mode()        const { return _solver.getMode(); }

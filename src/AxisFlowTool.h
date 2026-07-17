@@ -101,8 +101,12 @@ private:
     void syncCompassPlane();
     /** Convert the pixel size from the settings into a world radius. */
     void syncCompassSize();
+    /** World units per screen pixel from the current camera (0 if unavailable). */
+    float computeWorldPerPixel();
     /** Compass follows the service, unless "always show compass" is set. */
     void updateCompassVisibility();
+    /** Push the current indexing candidate state onto the compass. */
+    void refreshIndexingCandidates();
 
     /** Recompute the compass size whenever the camera changes (zoom, orbit). */
     static void cameraChangedCB(void* userData, SoSensor* sensor);

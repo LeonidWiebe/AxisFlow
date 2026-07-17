@@ -1,13 +1,14 @@
 """
 axisflow_settings -- a live settings dialog for AxisFlow.
 
-A two-column grid (name / value) where each value editor matches the setting's
-type: checkbox for booleans, spin box for numbers, a combo for enumerations, a
-colour swatch for colours. Changes apply immediately (no OK button): every
-editor calls AF.setSetting(...), which persists and emits the C++ changed()
-signal, so the compass/panel update on the fly.
+A sectioned settings editor: sections are listed on the left (horizontal text),
+each showing a two-column grid (name / value) whose value editor matches the
+setting's type: checkbox for booleans, spin box for numbers, a combo for
+enumerations, a colour swatch for colours. Changes apply immediately (no OK
+button): every editor calls AF.setSetting(...), which persists and emits the C++
+changed() signal, so the compass/panel update on the fly.
 
-Adding a new option later = add one row to _SPEC below.
+Adding a new option later = add one row to the relevant section in _SECTIONS.
 
 Opened by the "AxisFlow settings" command / toolbar button, or:
     import axisflow_settings; axisflow_settings.show()
@@ -25,25 +26,37 @@ except Exception as exc:      # pragma: no cover
 
 
 # --- setting descriptors --------------------------------------------------
-# (key, label, type, extra)
+# Settings are grouped into sections; each section becomes a page, selected
+# from the list on the left. A row is (key, label, type, extra):
 #   type 'bool'  -> checkbox                       ; extra None
 #   type 'int'   -> spin box                       ; extra (min, max, step)
 #   type 'float' -> double spin box                ; extra (min, max, step, decimals)
 #   type 'enum'  -> combo                          ; extra [labels...]  (index == value)
 #   type 'color' -> colour swatch (0xRRGGBBAA)     ; extra None
-_SPEC = [
-    ("alwaysShowCompass", "Always show compass",     "bool",  None),
-    ("compassSize",       "Compass size (px)",       "int",   (20, 1000, 5)),
-    ("axisThickness",     "Axis thickness (px)",     "int",   (1, 20, 1)),
-    ("axisStartPct",      "Axis start (fraction)",   "float", (0.0, 1.0, 0.05, 2)),
-    ("axisLengthPct",     "Axis length (fraction)",  "float", (0.0, 1.0, 0.05, 2)),
-    ("fillTransparency",  "Fill transparency",       "float", (0.0, 1.0, 0.05, 2)),
-    ("axisColorX",        "X axis colour",           "color", None),
-    ("axisColorY",        "Y axis colour",           "color", None),
-    ("activeFieldColor",  "Active field colour",     "color", None),
-    ("liveLineEnabled",   "Live line",               "bool",  None),
-    ("liveLineStyle",     "Live line style",         "enum",  ["Solid", "Dashed", "Dotted", "Dash-dot"]),
-    ("liveLineColor",     "Live line colour",        "color", None),
+# Adding a new option later = add one row to the right section below.
+_SECTIONS = [
+    ("Compass", [
+        ("alwaysShowCompass", "Always show compass",     "bool",  None),
+        ("compassSize",       "Compass size (px)",       "int",   (20, 1000, 5)),
+        ("axisThickness",     "Axis thickness (px)",     "int",   (1, 20, 1)),
+        ("axisStartPct",      "Axis start (fraction)",   "float", (0.0, 1.0, 0.05, 2)),
+        ("axisLengthPct",     "Axis length (fraction)",  "float", (0.0, 1.0, 0.05, 2)),
+        ("fillTransparency",  "Fill transparency",       "float", (0.0, 1.0, 0.05, 2)),
+        ("axisColorX",        "X axis colour",           "color", None),
+        ("axisColorY",        "Y axis colour",           "color", None),
+        ("activeFieldColor",  "Active field colour",     "color", None),
+    ]),
+    ("Live Line", [
+        ("liveLineEnabled",   "Live line",               "bool",  None),
+        ("liveLineStyle",     "Live line style",         "enum",  ["Solid", "Dashed", "Dotted", "Dash-dot"]),
+        ("liveLineColor",     "Live line colour",        "color", None),
+        ("liveLineTransparency", "Live line transparency", "float", (0.0, 1.0, 0.05, 2)),
+        ("useDistanceIndexing", "Use distance indexing", "bool",  None),
+        ("useAxesIndexing",     "Use axes indexing",     "bool",  None),
+        ("indexingTolerance",   "Indexing tolerance (px)", "int", (0, 50, 1)),
+        ("indexingAxisWeight",  "Indexing axis weight (px)", "int", (1, 20, 1)),
+        ("indexingAxisTransparency", "Indexing axis transparency", "float", (0.0, 1.0, 0.05, 2)),
+    ]),
 ]
 
 
@@ -99,25 +112,48 @@ class AxisFlowSettingsDialog(QtWidgets.QDialog):
         self._updating = False
         self._editors = {}          # key -> (type, widget)
 
-        grid = QtWidgets.QGridLayout(self)
-        grid.setColumnStretch(1, 1)
-        grid.setHorizontalSpacing(16)
-        grid.setVerticalSpacing(6)
-
         values = AF.getSettings() if AF else {}
 
+        # Section selector on the left (horizontal text), pages on the right.
+        # A QListWidget + QStackedWidget gives left-hand tabs whose labels stay
+        # horizontal -- a QTabWidget in the "West" position rotates them.
+        self._nav = QtWidgets.QListWidget()
+        self._nav.setFixedWidth(104)
+        self._nav.setFocusPolicy(QtCore.Qt.NoFocus)
+        self._stack = QtWidgets.QStackedWidget()
+
         self._updating = True
-        for row, (key, label, typ, extra) in enumerate(_SPEC):
-            grid.addWidget(QtWidgets.QLabel(label), row, 0)
-            widget = self._make_editor(key, typ, extra, values.get(key))
-            grid.addWidget(widget, row, 1)
-            self._editors[key] = (typ, widget)
+        for title, rows in _SECTIONS:
+            page = QtWidgets.QWidget()
+            grid = QtWidgets.QGridLayout(page)
+            grid.setColumnStretch(1, 1)
+            grid.setHorizontalSpacing(16)
+            grid.setVerticalSpacing(6)
+            grid.setContentsMargins(12, 12, 12, 12)
+            for r, (key, label, typ, extra) in enumerate(rows):
+                grid.addWidget(QtWidgets.QLabel(label), r, 0)
+                widget = self._make_editor(key, typ, extra, values.get(key))
+                grid.addWidget(widget, r, 1)
+                self._editors[key] = (typ, widget)
+            grid.setRowStretch(len(rows), 1)   # keep rows top-aligned
+            self._stack.addWidget(page)
+            self._nav.addItem(title)
         self._updating = False
+
+        self._nav.currentRowChanged.connect(self._stack.setCurrentIndex)
+        self._nav.setCurrentRow(0)
+
+        body = QtWidgets.QHBoxLayout()
+        body.setSpacing(10)
+        body.addWidget(self._nav)
+        body.addWidget(self._stack, 1)
 
         close = QtWidgets.QPushButton("Close")   # closes only; changes are already applied
         close.clicked.connect(self.close)
-        row = len(_SPEC)
-        grid.addWidget(close, row, 0, 1, 2)
+
+        outer = QtWidgets.QVBoxLayout(self)
+        outer.addLayout(body)
+        outer.addWidget(close)
 
     # -- editor construction ----------------------------------------------
     def _make_editor(self, key, typ, extra, value):

@@ -88,6 +88,8 @@
 ## 4. Среда сборки (Windows)
 
 - Windows, MSVC (Visual Studio 17 2022), x64. Qt6, Coin4, FreeCAD 1.1.1 в **pixi**-окружении.
+  Модуль линкуется с `OpenGL::GL` (`find_package(OpenGL)`) — компас включает сглаживание точек
+  сырыми `gl*`-вызовами (круглые точки), символы `glEnable/glBlendFunc/...` живут в `opengl32`.
 - FreeCAD env (pixi): `C:/projects/FreeCAD111/.pixi/envs/default`; FreeCAD src `…/FreeCAD111/src`, build `…/FreeCAD111/build/release`.
 - Проект: `C:\projects\AxisFlow`; установка: `%APPDATA%\FreeCAD\Mod\AxisFlow\`. Путь берётся у FreeCAD (`getUserAppDataDir()`), не захардкожен; в этой среде разрешается в `…\FreeCAD\Mod\` (без `v1-1` — прежнее предположение про версионированный каталог здесь не подтвердилось). Переопределяется `-DFREECAD_MOD_DIR=...`.
 - Собрать в песочнице ассистента нельзя (нет FreeCAD SDK) — код пишется аккуратно,
@@ -136,6 +138,13 @@
 - **AxisFlowEntry.h** (`src/AxisFlowEntry.h`) — header-only чистая политика ввода без Qt/Coin
   (`signedByDirection`): знак магнитуды по направлению курсора, явный знак важнее. Вынесено из
   панели, чтобы покрыть Tier-1 юнит-тестом.
+- **AxisFlowIndexing.h** (`src/AxisFlowIndexing.h`) — header-only чистая политика «индексирования
+  живой линии» без Qt/Coin (`computeIndexing`). Два независимых снапа (по дистанции и по осям)
+  работают в пикселях (принимает `worldPerPixel` от камеры) и только в локальном фрейме. Солвер
+  хранит состояние (индексированная дистанция, флаги, допуск, view-scale, фрейм) и вызывает её из
+  `getSolvedPoint()`, так что клик автоматически ставит точку в кандидат. Компас рисует точку-
+  кандидата (дистанция) и ось-кандидата (ось); толщина/прозрачность оси-кандидата и прозрачность
+  живой линии — из настроек. Покрыто Tier-1 (`tests/test_indexing.cpp`).
 - **Command.cpp / Workbench** — четыре команды на палитре: `AxisFlow_Activate` (тумблер компаса),
   `AxisFlow_DrawLine` (запускает демо `axisflow_demo.line()` — точка входа, геометрия в демо),
   `AxisFlow_ToggleLiveLine` (вкл/выкл живой линии), `AxisFlow_Settings` (окно настроек). У каждой
@@ -146,7 +155,7 @@
   `reformatField` для показа знакового значения.
 - **axisflow_settings.py** — живой немодальный диалог настроек (Python/PySide): двухстолбцовый
   грид имя→значение, редактор по типу (чекбокс/спинбокс/дабл-спинбокс/комбо/кнопка-цвет), приме­
-  нение на лету через `AF.setSetting` (без OK). Расширяется одной строкой в таблице `_SPEC`.
+  нение на лету через `AF.setSetting` (без OK). Диалог секционирован (табы слева, горизонтальный текст: `QListWidget`+`QStackedWidget`) — разделы Compass / Live Line; расширяется одной строкой в нужной секции `_SECTIONS`.
   Открывается командой `AxisFlow_Settings`. Ограничение: пока открыт, не подхватывает внешние
   изменения (`changed()` не проброшен в Python), перечитывает при повторном открытии.
 - **axisflow_snap.py** — опциональный Draft-адаптер: оборачивает `Snapper.snap`, зеркалит
@@ -171,6 +180,12 @@
 | `LiveLineEnabled` | Bool | true | рисовать живую направляющую центр→курсор |
 | `LiveLineStyle` | Int | 1 | 0 сплошная, 1 пунктир, 2 точки, 3 штрих-пунктир |
 | `LiveLineColor` | Unsigned | 0xFFE633FF | цвет живой линии (0xRRGGBBAA) |
+| `LiveLineTransparency` | Float | 0.0 | прозрачность живой линии (0..1) |
+| `UseDistanceIndexing` | Bool | false | индексирование живой линии по дистанции |
+| `UseAxesIndexing` | Bool | false | индексирование живой линии по осям X/Y |
+| `IndexingTolerance` | Int | 8 | допуск индексации в пикселях (0..50) |
+| `IndexingAxisWeight` | Int | 2 | толщина линии оси-кандидата, пиксели |
+| `IndexingAxisTransparency` | Float | 0.35 | прозрачность оси-кандидата (0..1) |
 | `Hotkey.<Action>` | ASCII | см. дефолты | список Qt-кодов через запятую; `""` = не назначено |
 
 Действия для ключей клавиш: `ToggleActive` (Insert), `ToggleMode` (Space), `SmartLock`, `LockX`,
@@ -204,12 +219,27 @@ GUI-редактор — `axisflow_settings.py` (команда `AxisFlow_Settin
 - **Демо-линия** (вне ядра): многосегментная, собственное Coin-превью, транзакции/undo на каждую
   линию, снятие выделения с готовой линии; Escape — новая линия, backtick — конец.
 - Draft-адаптер (`axisflow_snap.py`).
+- **Индексирование живой линии** (локальный фрейм): снап по дистанции (точка-кандидат на конце
+  живой линии при приближении длины к запомненной «индексированной дистанции») и по осям (ось-
+  кандидат вместо живой линии при приближении к оси X/Y). Допуск в пикселях, чистая математика в
+  `AxisFlowIndexing.h`, снап зашит в `getSolvedPoint()`, визуалы в компасе, 6 новых настроек,
+  Python-API (`setIndexedDistance/clearIndexedDistance`, поля в `getState`), Tier-1+Tier-2 тесты.
+  Нюансы: точка-кандидата гасится во время ввода координаты в поле (введённое значение важнее
+  снапа); пока активен любой кандидат — точка (снап длины) или ось (обнуление перпендикулярной
+  компоненты) — поля X/Y/Z (или D/A) синхронизируются со снапнутой точкой, иначе показывают сырой
+  курсор. Точки (центр компаса и кандидат) круглые (`GL_POINT_SMOOTH`, линк с `OpenGL::GL`).
 - **Автотесты**: Tier 1 — C++ gtest (`tests/`, солвер+хоткеи+`AxisFlowEntry`; gtest компилируется
-  из исходников прямо в раннер, 29 кейсов, `run_tests.bat`/`ctest`, headless); Tier 2 — Python API
-  (`TestAxisFlow.py`, 9 кейсов, гоняется в GUI-FreeCAD `Test.runTestsFromModule`). Оба зелёные.
+  из исходников прямо в раннер, 50 кейсов (солвер+хоткеи+entry+indexing), `run_tests.bat`/`ctest`, headless); Tier 2 — Python API
+  (`TestAxisFlow.py`, 15 кейсов, гоняется в GUI-FreeCAD `Test.runTestsFromModule`). Оба зелёные.
   Детали — `TESTING.md`.
-- **Релиз-кит**: `package.xml` (метаданные), `make_release.bat` (сборка ZIP), `RELEASE.md`,
-  `LICENSE` (полный LGPL-2.1), раздел Installation в README.
+- **Релиз-кит**: `package.xml` (метаданные), `CHANGELOG.md` (Keep a Changelog),
+  `stage_dist.bat` (общий стейджинг рантайм-файлов в `dist/AxisFlow`), `make_release.bat`
+  (ZIP), `build_installer.bat` + `installer/AxisFlow.nsi` (NSIS-установщик: per-user в
+  `Mod`, детект `v1-1\Mod`, аптделит в «Программы и компоненты» под HKCU, Qt/Coin/Python не
+  тащит), `install.sh` + `stage_dist.sh` (Linux: one-liner `curl … | bash` качает прекомпилен-
+  тарбол из Releases с проверкой SHA256 и **отказом на не-1.1.x FreeCAD**, если не `--force`;
+  требует кроссплатформенного CMake для сборки самого `.so`), `RELEASE.md`, `LICENSE`
+  (полный LGPL-2.1), раздел Installation в README.
 
 **Не сделано / известные хвосты:**
 - Полярный лок в решателе (ветка Polar в `getSolvedPoint()` игнорирует `_lock`); лок одноосевой.
@@ -407,7 +437,7 @@ REM install кладёт .pyd + InitGui/axisflow_*.py + Resources (+ TestAxisFlo
 Три уровня (подробно — `TESTING.md`):
 - **Tier 1 — C++ gtest** (`tests/`): чистая логика (солвер, хоткеи, `AxisFlowEntry`), без FreeCAD и
   дисплея. gtest компилируется из исходников прямо в раннер (см. §9.10). Запуск: `run_tests.bat`
-  или `-DAXISFLOW_BUILD_TESTS=ON` + `ctest` (pixi-DLL на PATH). 29 кейсов, +1 `DISABLED_`
+  или `-DAXISFLOW_BUILD_TESTS=ON` + `ctest` (pixi-DLL на PATH). 50 кейсов, +1 `DISABLED_`
   (полярный лок — маркер будущей фичи).
 - **Tier 2 — Python API** (`TestAxisFlow.py`): реальный `.pyd` в GUI-FreeCAD
   (`import Test, TestAxisFlow; Test.runTestsFromModule(TestAxisFlow)`). Модуль Gui-связан, в
@@ -423,7 +453,7 @@ AxisFlow — **компилируемый C++-верстак** (`AxisFlow.pyd`).
 
 **ABI-замок:** `.pyd` грузится только в FreeCAD с совпадающими Python/Qt/Coin ABI — собирать против
 той же дистрибуции, что у пользователей, и проверять ZIP на чистой установке. Имя вида
-`AxisFlow-0.1.1-win64-FC1.1.zip`.
+`AxisFlow-0.1.2-win64-FC1.1.zip`.
 
 Инструменты: `make_release.bat` (собирает рантайм-папку `dist/AxisFlow` — только `.pyd`+`.py`+
 `Resources`+`package.xml`+`LICENSE` — и жмёт ZIP через PowerShell), `package.xml` (метаданные),

@@ -3,6 +3,7 @@
 #include "AxisFlowService.h"
 #include "AxisFlowSettings.h"
 
+#include <cmath>
 #include <limits>
 
 namespace AxisFlowGui {
@@ -223,6 +224,19 @@ void AxisFlowService::setKeyValue(int field, double value)
         default: break;
         }
     }
+
+    // Distance indexing: a value the user fixed into a coordinate field is
+    // remembered as the "indexed distance" (a length to snap the live line to
+    // later). In rect that is the X or Y field; in polar only the distance
+    // field (0), never the angle (1). Only in the local frame -- a world-frame
+    // value is an absolute coordinate, not a length from the origin. The
+    // remembered length is a plain scalar, so it survives mode switches (1.3).
+    if (_solver.localFrame()) {
+        const bool rect = (_solver.getMode() == CompassMode::Rectangular);
+        if ((rect && (field == 0 || field == 1)) || (!rect && field == 0))
+            _solver.setIndexedDistance(std::fabs(value));
+    }
+
     Q_EMIT stateChanged();
     refreshCursor();   // the typed value moves the point even with a still mouse
 }
@@ -302,6 +316,50 @@ void AxisFlowService::clearKeyValues()
 {
     _solver.clearKeyValues();
     Q_EMIT stateChanged();
+}
+
+// ---------------------------------------------------------------------------
+// Live-line indexing
+// ---------------------------------------------------------------------------
+
+void AxisFlowService::applyIndexingSettings()
+{
+    AxisFlowSettings& s = AxisFlowSettings::instance();
+    _solver.setUseDistanceIndexing(s.useDistanceIndexing());
+    _solver.setUseAxisIndexing(s.useAxesIndexing());
+    _solver.setIndexTolerancePx(s.indexingTolerance());
+    // A tolerance/enable change moves the candidate state without mouse motion.
+    refreshCursor();
+}
+
+void AxisFlowService::setViewScale(double worldPerPixel)
+{
+    // Silent on purpose: this is pushed on every mouse move (and on every
+    // camera change). Emitting here would re-enter through the tool's
+    // syncCompassSize -> setViewScale and loop.
+    _solver.setViewScale(worldPerPixel);
+}
+
+void AxisFlowService::setLocalFrame(bool local)
+{
+    if (_solver.localFrame() == local) return;
+    _solver.setLocalFrame(local);
+    Q_EMIT stateChanged();
+    refreshCursor();   // candidates appear/disappear as the frame flips
+}
+
+void AxisFlowService::setIndexedDistance(double d)
+{
+    _solver.setIndexedDistance(d);
+    Q_EMIT stateChanged();
+    refreshCursor();
+}
+
+void AxisFlowService::clearIndexedDistance()
+{
+    _solver.clearIndexedDistance();
+    Q_EMIT stateChanged();
+    refreshCursor();
 }
 
 } // namespace AxisFlowGui

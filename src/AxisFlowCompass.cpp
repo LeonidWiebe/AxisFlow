@@ -17,6 +17,9 @@
 #include <Inventor/nodes/SoMaterial.h>
 #include <Inventor/nodes/SoDrawStyle.h>
 #include <Inventor/nodes/SoShapeHints.h>
+#include <Inventor/nodes/SoCallback.h>
+#include <Inventor/actions/SoGLRenderAction.h>
+#include <Inventor/system/gl.h>
 #include <Inventor/SbMatrix.h>
 #include <Inventor/SbRotation.h>
 
@@ -44,6 +47,26 @@ SbColor rgbOf(unsigned long rgba)
     float r, g, b, a;
     AxisFlowSettings::unpackColor(rgba, r, g, b, a);
     return SbColor(r, g, b);
+}
+
+// GL_POINTS are drawn as squares. These callbacks turn on point antialiasing
+// (with blending) so a SoPointSet renders as a filled disc, then restore the
+// exact prior GL state via push/pop so nothing leaks into the rest of the
+// scene. Bracket a point set with beginRoundPoints .. endRoundPoints.
+void beginRoundPoints(void*, SoAction* action)
+{
+    if (!action->isOfType(SoGLRenderAction::getClassTypeId())) return;
+    glPushAttrib(GL_COLOR_BUFFER_BIT | GL_ENABLE_BIT | GL_POINT_BIT);
+    glEnable(GL_POINT_SMOOTH);
+    glHint(GL_POINT_SMOOTH_HINT, GL_NICEST);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+}
+
+void endRoundPoints(void*, SoAction* action)
+{
+    if (!action->isOfType(SoGLRenderAction::getClassTypeId())) return;
+    glPopAttrib();
 }
 
 } // namespace
@@ -138,7 +161,9 @@ void AxisFlowCompass::build()
     dotSep->addChild(_dotColor);
     dotSep->addChild(_dotStyle);
     dotSep->addChild(_coordDot);
+    { auto* cb = new SoCallback; cb->setCallback(&beginRoundPoints); dotSep->addChild(cb); }
     dotSep->addChild(_dot);
+    { auto* cb = new SoCallback; cb->setCallback(&endRoundPoints);   dotSep->addChild(cb); }
     content->addChild(dotSep);
 
     // ---- axes: X and Y only (no Z) ----
@@ -161,21 +186,67 @@ void AxisFlowCompass::build()
     content->addChild(buildAxis(_colorX, _styleX, _coordX, _lineX));
     content->addChild(buildAxis(_colorY, _styleY, _coordY, _lineY));
 
-    // ---- guide line ----
+    // ---- guide line (live line) ----
     _guideSep = new SoSeparator;
-    _colorGuide = new SoBaseColor;
-    _colorGuide->rgb.setValue(kGuideColor);
+    _matGuide = new SoMaterial;
+    _matGuide->diffuseColor.setValue(kGuideColor);
+    _matGuide->transparency.setValue(0.0f);
     _styleGuide = new SoDrawStyle;
     _styleGuide->lineWidth.setValue(1.0f);
     _styleGuide->linePattern.setValue(0xF0F0);   // dashed (overridden by settings)
     _coordGuide = new SoCoordinate3;
     _lineGuide = new SoLineSet;
     _lineGuide->numVertices.setValue(2);
-    _guideSep->addChild(_colorGuide);
+    _guideSep->addChild(_matGuide);
     _guideSep->addChild(_styleGuide);
     _guideSep->addChild(_coordGuide);
     _guideSep->addChild(_lineGuide);
     content->addChild(_guideSep);
+
+    // ---- candidate axis (replaces the live line when axis indexing snaps) ----
+    _axisCandSwitch = new SoSwitch;
+    _axisCandSwitch->whichChild.setValue(SO_SWITCH_NONE);
+    {
+        auto* sep = new SoSeparator;
+        _matAxisCand = new SoMaterial;
+        _matAxisCand->diffuseColor.setValue(kGuideColor);
+        _matAxisCand->transparency.setValue(0.35f);
+        _styleAxisCand = new SoDrawStyle;
+        _styleAxisCand->lineWidth.setValue(2.0f);
+        _styleAxisCand->linePattern.setValue(0xFFFF);
+        _coordAxisCand = new SoCoordinate3;
+        _lineAxisCand = new SoLineSet;
+        _lineAxisCand->numVertices.setValue(0);
+        sep->addChild(_matAxisCand);
+        sep->addChild(_styleAxisCand);
+        sep->addChild(_coordAxisCand);
+        sep->addChild(_lineAxisCand);
+        _axisCandSwitch->addChild(sep);
+    }
+    content->addChild(_axisCandSwitch);
+
+    // ---- candidate point (distance-indexing snap marker at the line end) ----
+    _candDotSwitch = new SoSwitch;
+    _candDotSwitch->whichChild.setValue(SO_SWITCH_NONE);
+    {
+        auto* sep = new SoSeparator;
+        _candDotColor = new SoBaseColor;
+        _candDotColor->rgb.setValue(kDotColor);
+        _candDotStyle = new SoDrawStyle;
+        _candDotStyle->pointSize.setValue(6.0f);
+        _candDotCoord = new SoCoordinate3;
+        _candDotCoord->point.set1Value(0, SbVec3f(0, 0, 0));
+        _candDot = new SoPointSet;
+        _candDot->numPoints.setValue(1);
+        sep->addChild(_candDotColor);
+        sep->addChild(_candDotStyle);
+        sep->addChild(_candDotCoord);
+        { auto* cb = new SoCallback; cb->setCallback(&beginRoundPoints); sep->addChild(cb); }
+        sep->addChild(_candDot);
+        { auto* cb = new SoCallback; cb->setCallback(&endRoundPoints);   sep->addChild(cb); }
+        _candDotSwitch->addChild(sep);
+    }
+    content->addChild(_candDotSwitch);
 }
 
 // ---------------------------------------------------------------------------
@@ -197,8 +268,24 @@ void AxisFlowCompass::applySettings()
     _fillSq->transparency.setValue(transp);
     _fillCi->transparency.setValue(transp);
 
-    // Live guide line: on/off, dash style, colour.
-    applyGuideStyle(s.liveLineEnabled(), s.liveLineStyle(), s.liveLineColor());
+    // Live guide line: on/off, dash style, colour, transparency.
+    applyGuideStyle(s.liveLineEnabled(), s.liveLineStyle(), s.liveLineColor(),
+                    s.liveLineTransparency());
+
+    // Candidate axis inherits the live line's colour + pattern; its own weight
+    // and transparency come from the indexing settings.
+    if (_matAxisCand)
+        _matAxisCand->diffuseColor.setValue(rgbOf(s.liveLineColor()));
+    if (_styleAxisCand) {
+        static const unsigned short kPat[4] = { 0xFFFF, 0xF0F0, 0xAAAA, 0xFF18 };
+        const int idx = (s.liveLineStyle() < 0 || s.liveLineStyle() > 3) ? 1 : s.liveLineStyle();
+        _styleAxisCand->linePattern.setValue(kPat[idx]);
+    }
+    applyCandidateAxisStyle(s.indexingAxisWeight(), s.indexingAxisTransparency());
+
+    // Candidate point matches the centre dot's size.
+    if (_candDotStyle)
+        _candDotStyle->pointSize.setValue(std::max(4.0f, t * 2.5f));
 
     rebuild();   // axis start/length fractions may have changed too
 }
@@ -253,32 +340,59 @@ void AxisFlowCompass::rebuild()
 
 void AxisFlowCompass::rebuildGuide()
 {
-    if (!_guideEnabled) {
+    // The subgraph is positioned AND rotated by _transform, so everything here
+    // is in compass-local coordinates: project the world delta onto the plane
+    // basis (orthonormal, so a dot product is the inverse transform).
+    const SbVec3f d = _cursor - _origin;
+    _localEnd = SbVec3f(d.dot(_u), d.dot(_v), d.dot(_n));
+
+    // The live line hides while the candidate axis stands in for it.
+    const bool guideVisible = _guideEnabled && !_axisCandActive;
+    if (guideVisible) {
+        const SbVec3f pts[2] = { SbVec3f(0, 0, 0), _localEnd };
+        _coordGuide->point.setValues(0, 2, pts);
+        _coordGuide->point.setNum(2);
+        _lineGuide->numVertices.setValue(2);
+    } else {
         _lineGuide->numVertices.setValue(0);   // hidden
-        return;
     }
 
-    // The subgraph is positioned AND rotated by _transform, so the guide must be
-    // expressed in compass-local coordinates: project the world delta onto the
-    // plane basis (orthonormal, so a dot product is the inverse transform).
-    const SbVec3f d = _cursor - _origin;
-    const SbVec3f local(d.dot(_u), d.dot(_v), d.dot(_n));
+    // Candidate axis: centre -> end. The end is already ON the axis, because
+    // getSolvedPoint() perpendicular-projected it there before we got here.
+    if (_axisCandSwitch) {
+        if (_axisCandActive) {
+            const SbVec3f pts[2] = { SbVec3f(0, 0, 0), _localEnd };
+            _coordAxisCand->point.setValues(0, 2, pts);
+            _coordAxisCand->point.setNum(2);
+            _lineAxisCand->numVertices.setValue(2);
+            _axisCandSwitch->whichChild.setValue(0);
+        } else {
+            _lineAxisCand->numVertices.setValue(0);
+            _axisCandSwitch->whichChild.setValue(SO_SWITCH_NONE);
+        }
+    }
 
-    const SbVec3f pts[2] = { SbVec3f(0, 0, 0), local };
-    _coordGuide->point.setValues(0, 2, pts);
-    _coordGuide->point.setNum(2);
-    _lineGuide->numVertices.setValue(2);
+    // Candidate point at the (snapped) live-line end.
+    if (_candDotSwitch) {
+        if (_distCandActive) {
+            _candDotCoord->point.set1Value(0, _localEnd);
+            _candDotSwitch->whichChild.setValue(0);
+        } else {
+            _candDotSwitch->whichChild.setValue(SO_SWITCH_NONE);
+        }
+    }
 }
 
-void AxisFlowCompass::applyGuideStyle(bool enabled, int style, unsigned long rgba)
+void AxisFlowCompass::applyGuideStyle(bool enabled, int style, unsigned long rgba, double transparency)
 {
     _guideEnabled = enabled;
 
-    if (_colorGuide) {
-        const float r = static_cast<float>((rgba >> 24) & 0xFF) / 255.0f;
-        const float g = static_cast<float>((rgba >> 16) & 0xFF) / 255.0f;
-        const float b = static_cast<float>((rgba >>  8) & 0xFF) / 255.0f;
-        _colorGuide->rgb.setValue(r, g, b);
+    if (_matGuide) {
+        float r, g, b, a;
+        AxisFlowSettings::unpackColor(rgba, r, g, b, a);
+        _matGuide->diffuseColor.setValue(r, g, b);
+        const float tr = static_cast<float>(transparency < 0.0 ? 0.0 : (transparency > 1.0 ? 1.0 : transparency));
+        _matGuide->transparency.setValue(tr);
     }
     if (_styleGuide) {
         // solid, dashed, dotted, dash-dot
@@ -286,6 +400,25 @@ void AxisFlowCompass::applyGuideStyle(bool enabled, int style, unsigned long rgb
         const int idx = (style < 0 || style > 3) ? 1 : style;
         _styleGuide->linePattern.setValue(kPat[idx]);
     }
+    rebuildGuide();
+}
+
+void AxisFlowCompass::applyCandidateAxisStyle(int weightPx, double transparency)
+{
+    if (_styleAxisCand)
+        _styleAxisCand->lineWidth.setValue(static_cast<float>(std::max(1, weightPx)));
+    if (_matAxisCand) {
+        const float tr = static_cast<float>(transparency < 0.0 ? 0.0 : (transparency > 1.0 ? 1.0 : transparency));
+        _matAxisCand->transparency.setValue(tr);
+    }
+}
+
+void AxisFlowCompass::setIndexingCandidates(bool distanceActive, bool axisActive)
+{
+    if (distanceActive == _distCandActive && axisActive == _axisCandActive)
+        return;
+    _distCandActive = distanceActive;
+    _axisCandActive = axisActive;
     rebuildGuide();
 }
 

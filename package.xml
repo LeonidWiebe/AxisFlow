@@ -5,8 +5,8 @@
     Dynamic precision drawing assistant for FreeCAD: an AccuDraw-style compass
     with unit-aware coordinate input, axis locks, and a live guide line.
   </description>
-  <version>0.1.1</version>
-  <date>2026-07-12</date>
+  <version>0.1.2</version>
+  <date>2026-07-17</date>
   <maintainer email="[email protected]">Leonid Wiebe</maintainer>
   <license file="LICENSE">LGPL-2.1-or-later</license>
 

@@ -14,6 +14,7 @@ AxisFlowSolver::AxisFlowSolver()
     , _rawPoint(0,0,0)
     , _kX(NaN), _kY(NaN), _kZ(NaN)
     , _kDist(NaN), _kAngle(NaN)
+    , _indexedDistance(NaN)
 {
     _compass.setToUnity(); // identity — aligns with world axes
 }
@@ -139,7 +140,7 @@ AxisLock AxisFlowSolver::nearestAxis() const
     return (std::abs(l.x) >= std::abs(l.y)) ? AxisLock::X : AxisLock::Y;
 }
 
-Base::Vector3d AxisFlowSolver::getSolvedPoint() const
+Base::Vector3d AxisFlowSolver::solvedLocalBase() const
 {
     Base::Vector3d local = getLocalOffset();
 
@@ -169,10 +170,37 @@ Base::Vector3d AxisFlowSolver::getSolvedPoint() const
         local.z = std::isnan(_kZ) ? local.z : _kZ;
     }
 
+    return local;
+}
+
+IndexingResult AxisFlowSolver::indexing() const
+{
+    const Base::Vector3d l = solvedLocalBase();
+    IndexingInput in;
+    in.lx = l.x;  in.ly = l.y;  in.lz = l.z;
+    in.indexedDistance = _indexedDistance;
+    in.tolerancePx     = _tolPx;
+    in.worldPerPixel   = _worldPerPixel;
+    in.useDistance     = _useDistIdx;
+    in.useAxis         = _useAxisIdx;
+    in.localFrame      = _localFrame;
+    in.axisLocked      = (_lock != AxisLock::None);
+    // "Entering a coordinate" == any keyboard override currently set.
+    in.entryActive     = hasValueX() || hasValueY() || hasValueZ()
+                       || hasValueDist() || hasValueAngle();
+    return computeIndexing(in);
+}
+
+Base::Vector3d AxisFlowSolver::getSolvedPoint() const
+{
+    // Indexing yields the adjusted local offset (== base when nothing snapped).
+    const IndexingResult r = indexing();
+    const double lx = r.lx, ly = r.ly, lz = r.lz;
+
     // Transform local offset back to world space
-    double wx = _compass[0][0]*local.x + _compass[0][1]*local.y + _compass[0][2]*local.z;
-    double wy = _compass[1][0]*local.x + _compass[1][1]*local.y + _compass[1][2]*local.z;
-    double wz = _compass[2][0]*local.x + _compass[2][1]*local.y + _compass[2][2]*local.z;
+    double wx = _compass[0][0]*lx + _compass[0][1]*ly + _compass[0][2]*lz;
+    double wy = _compass[1][0]*lx + _compass[1][1]*ly + _compass[1][2]*lz;
+    double wz = _compass[2][0]*lx + _compass[2][1]*ly + _compass[2][2]*lz;
 
     return _origin + Base::Vector3d(wx, wy, wz);
 }

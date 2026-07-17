@@ -1,6 +1,6 @@
 # AxisFlow Workbench for FreeCAD
 
-version 0.1.1 (alpha)
+version 0.1.2 (alpha)
 
 **AxisFlow** is a precision drawing assistant for FreeCAD, inspired by the workflow concept of **MicroStation AccuDraw**.
 
@@ -156,16 +156,35 @@ The workbench menu / toolbar exposes:
 ## Installation
 
 AxisFlow is a **compiled C++ workbench**, so it is not installed through FreeCAD's
-Addon Manager (which only handles Python-only addons). Install a prebuilt release:
+Addon Manager (which only handles Python-only addons). Install a prebuilt release
+that matches your FreeCAD.
 
-1. Download `AxisFlow-<version>-win64-FC1.1.zip` from the project's **Releases** page.
+### Windows
+
+1. Download `AxisFlow-<version>-win64-FC1.1.zip` from the project's **Releases** page
+   (or run the `setup.exe` installer, which places the files and registers an
+   uninstaller — see `RELEASE.md`).
 2. Unzip it so the `AxisFlow` folder lands in your FreeCAD `Mod` directory — on
    Windows `%APPDATA%\FreeCAD\Mod\`, giving `...\FreeCAD\Mod\AxisFlow\InitGui.py`.
    (The exact path is printed by `App.getUserAppDataDir()` in FreeCAD's Python console.)
 3. Fully restart FreeCAD and pick **AxisFlow** from the workbench selector.
 
-A compiled `.pyd` only loads in a FreeCAD build whose **Python/Qt/Coin ABI matches**
-the one it was built against, so use a release built for your FreeCAD version. If the
+### Linux (one command)
+
+For FreeCAD **1.1.x on x86_64**, download + install in one line:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/LeonidWiebe/AxisFlow/main/install.sh | bash
+```
+
+The script detects your FreeCAD version and Mod folder, downloads the prebuilt
+tarball from Releases, verifies its checksum and installs it. If your FreeCAD is
+**not** 1.1.x it stops rather than install an incompatible binary — pass `--force`
+to override, `--mod-dir=…` to choose the target, or `--uninstall` to remove it.
+Prefer to inspect first? `curl -fsSLO …/install.sh && less install.sh && bash install.sh`.
+
+A compiled module only loads in a FreeCAD build whose **Python/Qt/Coin ABI matches**
+the one it was built against, so use a release built for your FreeCAD. If the
 workbench doesn't appear after a restart, the binary likely doesn't match your build.
 Maintainers: see `RELEASE.md` for how to package and publish a release.
 

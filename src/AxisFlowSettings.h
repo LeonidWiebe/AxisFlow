@@ -85,6 +85,27 @@ public:
     void setLiveLineStyle(int v);
     void setLiveLineColor(unsigned long rgba);
 
+    // ---- live-line indexing ----------------------------------------------
+    /** Snap the live-line length to a remembered "indexed distance". */
+    bool useDistanceIndexing() const { return _useDistanceIndexing; }
+    /** Snap the live line onto the nearest in-plane axis (X or Y). */
+    bool useAxesIndexing()     const { return _useAxesIndexing; }
+    /** Snap tolerance in screen pixels (0..50). */
+    int  indexingTolerance()   const { return _indexingTolerance; }
+    /** Transparency of the ordinary live line, 0 opaque .. 1 invisible. */
+    double liveLineTransparency() const { return _liveLineTransparency; }
+    /** Line width of the candidate-axis line, in pixels. */
+    int  indexingAxisWeight()  const { return _indexingAxisWeight; }
+    /** Transparency of the candidate-axis line, 0 opaque .. 1 invisible. */
+    double indexingAxisTransparency() const { return _indexingAxisTransparency; }
+
+    void setUseDistanceIndexing(bool v);
+    void setUseAxesIndexing(bool v);
+    void setIndexingTolerance(int v);
+    void setLiveLineTransparency(double v);
+    void setIndexingAxisWeight(int v);
+    void setIndexingAxisTransparency(double v);
+
     // ---- hotkeys ----------------------------------------------------------
     /** Fill @p hk from the settings; actions with no stored key keep their
      *  built-in default, an explicitly stored 0 means "unbound". */
@@ -104,18 +125,25 @@ private:
 
     ParameterGrp::handle group() const;
 
-    int           _compassSizePx     { 120 };
-    int           _axisThicknessPx   { 2 };
-    double        _axisStartPct      { 0.15 };
-    double        _axisLengthPct     { 0.70 };
+    int           _compassSizePx     { 100 };
+    int           _axisThicknessPx   { 4 };
+    double        _axisStartPct      { 0.80 };
+    double        _axisLengthPct     { 0.35 };
     unsigned long _axisColorX        { 0xFF0000FFul };   // red
     unsigned long _axisColorY        { 0x00FF00FFul };   // green
     unsigned long _activeFieldColor  { 0xDCDCDCFFul };   // slightly darker field
     double        _fillTransparency  { 0.65 };
     bool          _alwaysShowCompass { false };
-    bool          _liveLineEnabled   { true };
-    int           _liveLineStyle     { 1 };            // dashed
-    unsigned long _liveLineColor     { 0xFFE633FFul };  // warm yellow
+    bool          _liveLineEnabled   { false };
+    int           _liveLineStyle     { 0 };            // solid
+    unsigned long _liveLineColor     { 0x00AAFFFFul };  // cyan-blue
+
+    bool          _useDistanceIndexing { true };
+    bool          _useAxesIndexing     { true };
+    int           _indexingTolerance   { 15 };         // pixels, 0..50
+    double        _liveLineTransparency { 0.50 };
+    int           _indexingAxisWeight  { 8 };          // px
+    double        _indexingAxisTransparency { 0.50 };
 };
 
 } // namespace AxisFlowGui

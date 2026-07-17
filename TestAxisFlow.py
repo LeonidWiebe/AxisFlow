@@ -53,12 +53,18 @@ class TestAxisFlowApi(unittest.TestCase):
         AF.clearKeyValues()
         AF.resetPlane()
         AF.setMode('rect')
-        for k in ('liveLineEnabled', 'liveLineStyle', 'liveLineColor', 'compassSize'):
+        for k in ('liveLineEnabled', 'liveLineStyle', 'liveLineColor', 'compassSize',
+                  'liveLineTransparency', 'useDistanceIndexing', 'useAxesIndexing',
+                  'indexingTolerance', 'indexingAxisWeight', 'indexingAxisTransparency'):
             if k in self._settings:
                 try:
                     AF.setSetting(k, self._settings[k])
                 except Exception:
                     pass
+        try:
+            AF.clearIndexedDistance()
+        except Exception:
+            pass
         AF.loadHotkeysFromSettings()      # discard any session-scoped rebind
 
     # -- solve / locks / overrides ----------------------------------------
@@ -119,6 +125,47 @@ class TestAxisFlowApi(unittest.TestCase):
         self.assertFalse(bool(s['liveLineEnabled']))
         self.assertEqual(int(s['liveLineStyle']), 2)
         self.assertEqual(int(s['liveLineColor']), 0x33CCFFFF)
+
+    # -- indexing ----------------------------------------------------------
+    def test_indexing_settings_roundtrip(self):
+        AF.setSetting('useDistanceIndexing', True)
+        AF.setSetting('useAxesIndexing', True)
+        AF.setSetting('indexingTolerance', 12)
+        AF.setSetting('indexingAxisWeight', 3)
+        AF.setSetting('indexingAxisTransparency', 0.5)
+        AF.setSetting('liveLineTransparency', 0.25)
+        s = AF.getSettings()
+        self.assertTrue(bool(s['useDistanceIndexing']))
+        self.assertTrue(bool(s['useAxesIndexing']))
+        self.assertEqual(int(s['indexingTolerance']), 12)
+        self.assertEqual(int(s['indexingAxisWeight']), 3)
+        self.assertAlmostEqual(float(s['indexingAxisTransparency']), 0.5, places=3)
+        self.assertAlmostEqual(float(s['liveLineTransparency']), 0.25, places=3)
+
+    def test_indexing_tolerance_is_clamped(self):
+        AF.setSetting('indexingTolerance', 999)
+        self.assertLessEqual(int(AF.getSettings()['indexingTolerance']), 50)
+        AF.setSetting('indexingTolerance', -5)
+        self.assertGreaterEqual(int(AF.getSettings()['indexingTolerance']), 0)
+
+    def test_indexed_distance_api_and_state(self):
+        AF.setIndexedDistance(42.0)
+        self.assertAlmostEqual(float(AF.getState()['indexedDistance']), 42.0)
+        AF.clearIndexedDistance()
+        self.assertIsNone(AF.getState()['indexedDistance'])
+
+    def test_getstate_exposes_candidate_flags(self):
+        st = AF.getState()
+        self.assertIn('indexCandidatePoint', st)
+        self.assertIn('indexCandidateAxis', st)
+
+    def test_indexing_inert_without_view_scale(self):
+        # No 3-D view here -> no pixel scale pushed -> indexing cannot fire, so
+        # solve() must pass the raw point through even with indexing enabled.
+        AF.setSetting('useAxesIndexing', True)
+        AF.setSetting('indexingTolerance', 50)
+        p = AF.solve(_v(100, 3, 5))
+        self.assertAlmostEqual(p.y, 3.0)   # not snapped onto the X axis
 
 
 @unittest.skipIf(AF is None, "AxisFlow not importable (needs a GUI FreeCAD build)")
