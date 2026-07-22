@@ -82,6 +82,8 @@ Q_SIGNALS:
 private Q_SLOTS:
     void onCursorMoved(Base::Vector3d solved);
     void onServiceStateChanged();
+    /** RotateByView: align the compass plane with the current camera. */
+    void alignPlaneToView();
     void onActiveChanged(bool active);
     void onSettingsChanged();
     void onFinishLine();   // service->finishRequested: re-arm for the next line
@@ -99,6 +101,12 @@ private:
 
     /** Orient the compass to the service's working plane. */
     void syncCompassPlane();
+    /** Ask Draft's Snapper for a snapped point at a screen position.
+     *  Returns true and fills @p out on a hit; false means "no snap". */
+    bool querySnap(const SbVec2s& pixel, Base::Vector3d& out);
+    /** Hide Draft's snap markers when the tool ends. */
+    static void hideSnapMarkers();
+
     /** Convert the pixel size from the settings into a world radius. */
     void syncCompassSize();
     /** World units per screen pixel from the current camera (0 if unavailable). */

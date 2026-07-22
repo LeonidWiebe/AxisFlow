@@ -10,8 +10,24 @@
 
 namespace AxisFlowGui {
 
-/** Which axis (or none) is currently locked */
+/** An axis identifier (kept for nearestAxis() and the adapter's display-only
+ *  mirror of Draft's Snapper.mask; the solver itself no longer holds a single
+ *  "locked axis" -- a lock is a frozen override slot, see LockBit). */
 enum class AxisLock { None, X, Y, Z };
+
+/** Bits marking which override slots are LOCKS -- values frozen by the user
+ *  (checkbox / LockX-style hotkey / SmartLock) rather than typed in. The value
+ *  itself lives in the ordinary override slot (_kX etc.); the bit only records
+ *  its origin. The distinction matters for indexing: a typed value suppresses
+ *  the distance candidate (the entry already pins the point), a lock does not
+ *  (SmartLock along an axis should still index lengths on that axis). */
+enum LockBit : unsigned {
+    LockBitX     = 1u << 0,
+    LockBitY     = 1u << 1,
+    LockBitZ     = 1u << 2,
+    LockBitDist  = 1u << 3,
+    LockBitAngle = 1u << 4
+};
 
 /** Input mode of the compass */
 enum class CompassMode { Rectangular, Polar };
@@ -35,9 +51,6 @@ public:
     /** Raw 3-D point under the cursor (projected onto compass plane). */
     void setRawPoint(const Base::Vector3d& pt);
 
-    /** Lock movement to a single axis. */
-    void setAxisLock(AxisLock lock);
-
     /** Rectangular (X/Y/Z offsets) or Polar (dist + angle). */
     void setMode(CompassMode mode);
 
@@ -60,11 +73,31 @@ public:
     void resetCompassRotation();
 
     // ----- direct value override (from keyboard fields) -----
+    // A field is either FREE (follows the cursor) or FIXED (holds a value).
+    // setValue* fixes it as a TYPED entry; lockValue* fixes it as a LOCK
+    // (checkbox / hotkey). Both feed the same slot; only the LockBit differs.
     void setValueX(double v);
     void setValueY(double v);
     void setValueZ(double v);
     void setValueDist(double v);
     void setValueAngle(double v);   // degrees
+
+    /** Freeze a slot at @p v as a user LOCK (sets the matching LockBit). */
+    void lockValueX(double v);
+    void lockValueY(double v);
+    void lockValueZ(double v);
+    void lockValueDist(double v);
+    void lockValueAngle(double v);  // degrees
+
+    /** Which slots are lock-flavoured (bit set = frozen by a lock). */
+    unsigned lockMask() const { return _lockMask; }
+    /** Any lock at all (checkbox / hotkey / SmartLock). */
+    bool anyLock() const { return _lockMask != 0; }
+    /** A typed (non-lock) override is present -- suppresses distance indexing. */
+    bool typedEntryActive() const;
+    /** An in-plane slot is locked (rect: X/Y; polar: dist/angle) -- suppresses
+     *  the axis candidate, which would just duplicate the lock. */
+    bool inPlaneLocked() const;
 
     /** Clear all keyboard overrides (public; used by the service on confirm). */
     void clearKeyValues();
@@ -101,6 +134,16 @@ public:
     /** Indexing runs only in the local frame; the panel pushes this. */
     void setLocalFrame(bool local)       { _localFrame = local; }
 
+    // ----- object snapping (Draft Snapper) -----
+    /** Live object snap. While active the snapped point REPLACES the cursor as
+     *  the point being placed, so locks, typed values and the read-out all work
+     *  on it. The raw cursor is still kept, for the snap axis-hold test. */
+    void setSnapPoint(const Base::Vector3d& world) { _snap = world; _snapActive = true; }
+    void clearSnap()                     { _snapActive = false; }
+    bool snapActive() const              { return _snapActive; }
+    Base::Vector3d snapPoint() const     { return _snap; }
+
+
     /** Remembered length that distance-indexing snaps to (magnitude). */
     void setIndexedDistance(double d)    { _indexedDistance = std::isnan(d) ? d : std::fabs(d); }
     void clearIndexedDistance()          { _indexedDistance = std::numeric_limits<double>::quiet_NaN(); }
@@ -131,7 +174,6 @@ public:
     AxisLock nearestAxis() const;
 
     // ----- state accessors -----
-    AxisLock       getAxisLock() const { return _lock; }
     CompassMode    getMode()     const { return _mode; }
     Base::Vector3d getOrigin()   const { return _origin; }
     Base::Vector3d getRawPoint() const { return _rawPoint; }
@@ -141,6 +183,14 @@ public:
     Base::Vector3d getPlaneV()      const;   // local +Y
     Base::Vector3d getPlaneNormal() const;   // local +Z
 
+    /** "Compass follows direction": align the compass +X (u) with a world
+     *  direction (usually the segment just drawn). keepNormal=true rotates in
+     *  the current plane only (the direction is projected onto it, Z stays);
+     *  keepNormal=false takes the direction fully, keeping the normal as close
+     *  to the old one as possible (old v is the fallback when the new u is
+     *  parallel to the old normal). A near-zero direction is a no-op. */
+    void rotateToDirection(const Base::Vector3d& worldDir, bool keepNormal);
+
     const Base::Matrix4D& getCompassMatrix() const { return _compass; }
 
 private:
@@ -148,12 +198,13 @@ private:
     Base::Vector3d  _rawPoint;
     Base::Matrix4D  _compass;       // compass local → world
 
-    AxisLock        _lock   { AxisLock::None };
     CompassMode     _mode   { CompassMode::Rectangular };
 
     // keyboard-override values (NaN = not set)
     double _kX, _kY, _kZ;
     double _kDist, _kAngle;
+    // LockBit flags: which of the slots above are lock-flavoured
+    unsigned _lockMask { 0 };
 
     // live-line indexing
     bool   _useDistIdx     { false };
@@ -163,7 +214,13 @@ private:
     bool   _localFrame     { true };
     double _indexedDistance;          // NaN = none (set in ctor)
 
+    Base::Vector3d _snap;             // live object-snap point (world)
+    bool   _snapActive     { false };
+
     void clearKeyboardValues();
+
+    /** World point -> compass-local offset from the origin. */
+    Base::Vector3d localOf(const Base::Vector3d& world) const;
 
     /** Solved local offset after overrides / lock / polar, BEFORE indexing. */
     Base::Vector3d solvedLocalBase() const;

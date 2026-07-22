@@ -26,7 +26,7 @@ vice-versa. Therefore:
   (state exactly which one), and
 - **test the ZIP on a clean install** of that FreeCAD before publishing.
 
-Name releases accordingly, e.g. `AxisFlow-0.1.2-win64-FC1.1.zip`.
+Name releases accordingly, e.g. `AxisFlow-0.1.3-win64-FC1.1.zip`.
 
 ## Cutting a release (maintainer)
 
@@ -40,10 +40,15 @@ Name releases accordingly, e.g. `AxisFlow-0.1.2-win64-FC1.1.zip`.
    make_release.bat
    ```
    This produces `AxisFlow-<version>-win64-FC1.1.zip` containing a single
-   `AxisFlow\` folder with the runtime files only (the `.pyd`, the `.py` glue,
-   `Resources\`, `package.xml`) — no sources, tests, or build artifacts.
+   `AxisFlow\` folder with the runtime files only (the `.pyd`, the `.py` glue
+   including `axisflow_snapping.py`, `Resources\`, `translations\*.qm`,
+   `hotkeys.ini`, `package.xml`) — no sources, tests, or build artifacts.
+   `stage_dist.bat` / `stage_dist.sh` are the single source of truth for that
+   list: **every newly shipped file must be added there and to the CMake
+   `install()` rules**, or it will be missing from installs (this has bitten us
+   with the translations and with `package.xml`).
 4. Test the ZIP on a clean FreeCAD (unzip into `Mod`, restart, use it).
-5. On GitHub: create a **tag** (e.g. `v0.1.2`) and a **Release**, attach the ZIP,
+5. On GitHub: create a **tag** (e.g. `v0.1.3`) and a **Release**, attach the ZIP,
    paste install instructions + which FreeCAD build it targets.
 
 ## Installing (end users)

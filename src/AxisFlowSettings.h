@@ -4,6 +4,8 @@
 
 #include <Base/Parameter.h>
 
+#include <string>
+
 namespace AxisFlowGui {
 
 class Hotkeys;
@@ -106,12 +108,54 @@ public:
     void setIndexingAxisWeight(int v);
     void setIndexingAxisTransparency(double v);
 
+    // ---- behaviour ---------------------------------------------------------
+    /** Use FreeCAD's (Draft) object snapping inside AxisFlow tools. */
+    bool useSnapping() const   { return _useSnapping; }
+    void setUseSnapping(bool v);
+
+    /** AccuDraw sign-from-direction: a bare magnitude typed into a local
+     *  rectangular field takes the sign of the cursor's current direction
+     *  along that axis (pointing down -X and typing "5" locks X = -5; the
+     *  field shows the typed text until it loses focus, then reformats to the
+     *  signed value). Off = the typed sign is used literally. Default on. */
+    bool smartNegativeDirection() const { return _smartNegative; }
+    void setSmartNegativeDirection(bool v);
+
+    /** Focus advance on movement: after typing a value into an in-plane field,
+     *  a deliberate cursor move finishes the entry and puts the caret into the
+     *  adjacent field (X <-> Y; D <-> A in radial mode), so a pair of
+     *  coordinates is typed in one flow. Default on. */
+    bool focusAdvanceOnMove() const { return _focusAdvance; }
+    void setFocusAdvanceOnMove(bool v);
+
+    /** "Compass follows direction": after a point is confirmed, align the
+     *  compass with the segment just drawn. 0 = off, 1 = on keeping the
+     *  normal (in-plane rotation, Z stays), 2 = on fully (the segment
+     *  direction becomes the compass +X). Default 0. */
+    int  compassFollowDirection() const { return _compassFollow; }
+    void setCompassFollowDirection(int v);
+
+    /** Compass rotation animation, in seconds (0 = instant). Display only:
+     *  the solver switches planes immediately, the compass eases after it. */
+    double compassRotateAnimation() const { return _rotateAnimS; }
+    void   setCompassRotateAnimation(double v);
+
     // ---- hotkeys ----------------------------------------------------------
     /** Fill @p hk from the settings; actions with no stored key keep their
      *  built-in default, an explicitly stored 0 means "unbound". */
+    /** Apply the default key layout from an INI file on top of the built-in
+     *  one. This is the DEFAULTS layer: user overrides (loadHotkeys) still win.
+     *  Returns false if the file is missing or unreadable, in which case @p hk
+     *  keeps the built-in layout. Problems are reported to the Report view. */
+    bool loadHotkeyDefaultsFile(const std::string& path, Hotkeys& hk);
+
     void loadHotkeys(Hotkeys& hk);
     /** Persist every bound action of @p hk (0 for unbound ones). */
     void saveHotkeys(const Hotkeys& hk);
+
+    /** Drop the user's stored key overrides so the defaults layer (built-in +
+     *  hotkeys.ini) applies again. Other options are left untouched. */
+    void clearStoredHotkeys();
 
 Q_SIGNALS:
     /** Any option changed; clients (compass, panel) should refresh. */
@@ -144,6 +188,12 @@ private:
     double        _liveLineTransparency { 0.50 };
     int           _indexingAxisWeight  { 8 };          // px
     double        _indexingAxisTransparency { 0.50 };
+
+    bool          _useSnapping { true };
+    bool          _smartNegative { true };
+    bool          _focusAdvance { true };
+    int           _compassFollow { 0 };
+    double        _rotateAnimS { 0.5 };
 };
 
 } // namespace AxisFlowGui

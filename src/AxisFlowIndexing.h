@@ -36,6 +36,9 @@ struct IndexingInput {
     double lx;                  // solved local offset, compass-local X (u)
     double ly;                  // ... Y (v)
     double lz;                  // ... Z (normal) -- carried through untouched
+    double cursorLx;            // RAW cursor in compass-local X, before snapping
+    double cursorLy;            // ... Y. Used to judge axis proximity, because
+                                // the snapped point itself may sit far off-axis.
     double indexedDistance;     // remembered length; NaN or <=0 => no distance index
     int    tolerancePx;         // indexing tolerance, 0..50 pixels
     double worldPerPixel;       // world units per screen pixel; <=0 => disabled
@@ -44,6 +47,13 @@ struct IndexingInput {
     bool   localFrame;          // true only in the local (compass) frame
     bool   axisLocked;          // an explicit axis lock is active (X/Y/Z)
     bool   entryActive;         // a coordinate is being typed into a field
+    bool   snapActive;          // an object snap (endpoint/midpoint/...) is live
+
+    // Locks pinned the point ONTO an in-plane axis (SmartLock's frozen pair,
+    // or a field manually frozen at exactly 0). Keeps the candidate axis lit
+    // while the user rides that axis -- lock feedback, not soft indexing.
+    bool   lockedOnAxisX { false };   // movement constrained to the X axis (Y frozen at 0)
+    bool   lockedOnAxisY { false };   // movement constrained to the Y axis (X frozen at 0)
 };
 
 struct IndexingResult {
@@ -71,11 +81,54 @@ inline IndexingResult computeIndexing(const IndexingInput& in)
     r.ly = in.ly;
     r.lz = in.lz;
 
+    // Lock feedback: a lock that pins the point onto an axis keeps the
+    // candidate axis visible. Placed BEFORE the frame/scale gates on purpose --
+    // this is not soft indexing, so it must not depend on the camera scale or
+    // the Local frame; every early return below carries the flag through. The
+    // compass geometry needs no axis hint: it draws centre -> solved end, and
+    // under the lock the solved point already lies on that axis.
+    if (in.lockedOnAxisX || in.lockedOnAxisY) {
+        r.axisActive = true;
+        r.axis = in.lockedOnAxisX ? IndexAxis::X : IndexAxis::Y;
+        r.kind = IndexKind::Axis;
+    }
+
     // Globally disabled: world frame, no camera scale, or a nonsensical tol.
     if (!in.localFrame || in.worldPerPixel <= 0.0 || in.tolerancePx < 0)
         return r;
 
     const double tol = static_cast<double>(in.tolerancePx);
+
+    // ---- Object snap wins over indexing --------------------------------
+    // A snap is an explicit geometric target; indexing is a soft guide, so it
+    // must not drag the point off a real endpoint/midpoint/centre.
+    //
+    // Exception -- axis hold: if the cursor was hugging an axis, the candidate
+    // axis survives the snap and "freezes" at the perpendicular projection of
+    // the snapped point onto that axis. That is the classic way of taking a
+    // distance from existing geometry while staying on the axis.
+    if (in.snapActive) {
+        if (!in.useAxis || in.axisLocked)
+            return r;                     // point stays exactly on the snap
+
+        // Which axis was the CURSOR hugging? (the snapped point may be far off)
+        const double distToX = std::fabs(in.cursorLy);
+        const double distToY = std::fabs(in.cursorLx);
+        const bool   nearX   = (distToX <= distToY);
+        const double perpPx  = (nearX ? distToX : distToY) / in.worldPerPixel;
+        r.axisOffsetPx = perpPx;
+        if (perpPx > tol)
+            return r;                     // cursor was not on an axis: plain snap
+
+        // Perpendicular projection of the snapped point onto that axis line:
+        // both other components collapse.
+        r.axisActive = true;
+        r.axis = nearX ? IndexAxis::X : IndexAxis::Y;
+        if (nearX) { r.ly = 0.0; r.lz = 0.0; }
+        else       { r.lx = 0.0; r.lz = 0.0; }
+        r.kind = IndexKind::Axis;
+        return r;
+    }
 
     // ---- Axis indexing: perpendicular-project onto the nearest axis --------
     // Distance to the X axis (line y=0) is |ly|; to the Y axis (line x=0) is

@@ -14,7 +14,7 @@
 #  Options:
 #    --mod-dir=DIR    install into DIR instead of the auto-detected Mod folder
 #    --freecad=PATH   path to freecadcmd (or a FreeCAD AppImage) for detection
-#    --version=TAG    install a specific release tag (e.g. v0.1.2) not "latest"
+#    --version=TAG    install a specific release tag (e.g. v0.1.3) not "latest"
 #    --force          install even if the FreeCAD version can't be matched
 #    --uninstall      remove an installed AxisFlow
 #    -h, --help       show this help

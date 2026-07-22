@@ -37,9 +37,9 @@ public:
     explicit AxisFlowPanel(QWidget* parent = nullptr);
 
     void setValues(double x, double y, double z);
-    void setValuesDist(double dist, double angle);
+    void setValuesDist(double dist, double angle, double z);
     void setMode(bool polar);
-    void setLockState(int lockedField);   // -1 none, 0 X, 1 Y, 2 Z
+    void setLockState();   // checkboxes <- fixed-field state (or the adapter mirror)
     void focusField(int index);
 
     /**
@@ -123,6 +123,10 @@ private:
     void refreshActiveHighlight();
     /** Pick the active field from the axis the cursor leans towards. */
     void updateActiveFieldFromCursor();
+    /** Focus advance on movement: after a value is typed into an in-plane
+     *  field, a deliberate cursor move finishes the entry and puts the caret
+     *  into the adjacent field (X <-> Y; D <-> A in radial mode). */
+    void maybeAdvanceFocus();
     /** Reflect the current readout frame (Local/World) on the frame button. */
     void updateFrameButton();
     /** Round a committed manual entry to the standard precision on focus-out. */
@@ -154,6 +158,16 @@ private:
     /** Field currently being typed into (-1 = none). Protected from the live
      *  read-out even before the text parses into a valid number. */
     int          _entryField { -1 };
+    /** Focus-advance-on-movement state: armed by a keystroke that produced a
+     *  valid value in field 0/1; the anchor is the raw cursor at that moment,
+     *  so only movement AFTER typing counts. */
+    bool         _advanceArmed { false };
+    double       _advanceAnchorX { 0.0 };
+    double       _advanceAnchorY { 0.0 };
+    /** After an advance the caret must STAY in the handed-over field even
+     *  though the cursor may still hug the previous axis -- this holds off the
+     *  nearest-axis auto-targeting until Tab / Escape / a confirmed point. */
+    bool         _advanceHold { false };
     /** Always 0..2 (0/1 in polar). Frozen while _entryField >= 0. */
     int          _activeField { 0 };
     bool         _ownsInput   { false };   // AxisFlow drives input (own tool)

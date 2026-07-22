@@ -16,7 +16,7 @@ Unicode true
 
 ; ---- identity (APPVERSION can be overridden: makensis /DAPPVERSION=x.y.z) ----
 !ifndef APPVERSION
-  !define APPVERSION "0.1.2"
+  !define APPVERSION "0.1.3"
 !endif
 !define APPNAME    "AxisFlow"
 !define FCTARGET   "FC1.1"
@@ -101,13 +101,20 @@ Section "AxisFlow (required)" SecMain
   File "${SRCDIR}\axisflow_snap.py"
   File "${SRCDIR}\axisflow_demo.py"
   File "${SRCDIR}\axisflow_settings.py"
+  File "${SRCDIR}\axisflow_snapping.py"
   File "${SRCDIR}\package.xml"
+  File "${SRCDIR}\hotkeys.ini"
   File /nonfatal "${SRCDIR}\README.md"
-  File /nonfatal "${SRCDIR}\CHANGELOG.md"
+  File /nonfatal "${SRCDIR}\man\CHANGELOG.md"
   File /nonfatal "${SRCDIR}\LICENSE"
 
   ; whole Resources subtree (Resources\icons\*.svg, etc.)
   File /r "${SRCDIR}\Resources"
+
+  ; compiled translations (AxisFlow_<lang>.qm); FreeCAD loads the current one
+  SetOutPath "$INSTDIR\translations"
+  File /nonfatal "${SRCDIR}\translations\*.qm"
+  SetOutPath "$INSTDIR"
 
   ; uninstaller + registration (all under HKCU -- per-user, no admin)
   SetOutPath "$INSTDIR"

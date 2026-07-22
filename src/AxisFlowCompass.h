@@ -1,6 +1,8 @@
 #pragma once
 
 #include <Inventor/SbVec3f.h>
+#include <Inventor/SbRotation.h>
+#include <Inventor/SbTime.h>
 #include <Inventor/SbColor.h>
 
 class SoSeparator;
@@ -13,6 +15,8 @@ class SoPointSet;
 class SoBaseColor;
 class SoMaterial;
 class SoDrawStyle;
+class SoTimerSensor;
+class SoSensor;
 
 namespace AxisFlowGui {
 
@@ -44,14 +48,20 @@ class AxisFlowCompass
 {
 public:
     AxisFlowCompass();
-    ~AxisFlowCompass() = default;
+    ~AxisFlowCompass();   // stops the rotation-animation sensor
 
     SoSeparator* getRootNode() const { return _root; }
 
     /** Place the compass centre at a world point. */
     void setOrigin(const SbVec3f& pt);
 
-    /** Orient the compass to a working plane (orthonormal basis). */
+    /** Orient the compass to a working plane (orthonormal basis). Purely a
+     *  DISPLAY concern: when the rotation-animation setting is non-zero the
+     *  compass eases into the new orientation (slerp, smoothstep) while the
+     *  solver has already switched -- input math never waits for the visuals.
+     *  The internal u/v/n (used by the guide-line math) are interpolated in
+     *  lockstep with the transform, so the live line stays glued to the
+     *  cursor throughout. */
     void setPlane(const SbVec3f& u, const SbVec3f& v, const SbVec3f& n);
 
     /** Guide line endpoint, in world space. */
@@ -159,6 +169,18 @@ private:
     int     _mode    { 0 };   // set via setMode(); 0 = ortho, 1 = radial
     SbVec3f _origin  { 0, 0, 0 };
     SbVec3f _cursor  { 0, 0, 0 };
+
+    // ---- rotation animation (display only) --------------------------------
+    SoTimerSensor* _animSensor { nullptr };
+    SbRotation _animFrom, _animTo;
+    SbVec3f    _animTgtU { 1, 0, 0 }, _animTgtV { 0, 1, 0 }, _animTgtN { 0, 0, 1 };
+    SbTime     _animT0;
+    float      _animDurationS { 0.5f };   // 0 = instant (from settings)
+    bool       _hasOrientation { false }; // first setPlane snaps, no animation
+    static void animTickCB(void* data, SoSensor*);
+    void animTick();
+    void applyRotationNow(const SbRotation& r);  // transform + derived u/v/n
+    void finishAnimation();
     SbVec3f _u       { 1, 0, 0 };
     SbVec3f _v       { 0, 1, 0 };
     SbVec3f _n       { 0, 0, 1 };

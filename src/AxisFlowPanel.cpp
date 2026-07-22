@@ -144,18 +144,17 @@ void AxisFlowPanel::wireToService()
 
     // Lock checkboxes -> service. 'clicked' fires only on user interaction, so
     // setLockState()'s programmatic setChecked() won't feed back here.
-    connect(_lockA, &QCheckBox::clicked, this, [](bool){
+    // Checked = the field is FROZEN at its current value; unchecked = it
+    // follows the cursor again. In the Draft adapter the boxes only display
+    // Draft's own restriction, so a click there just re-syncs the display.
+    auto toggleLock = [this](int field){
         AxisFlowService& s = AxisFlowService::instance();
-        (s.lock() == AxisLock::X) ? s.clearLocks() : s.lockAxis(AxisLock::X);
-    });
-    connect(_lockB, &QCheckBox::clicked, this, [](bool){
-        AxisFlowService& s = AxisFlowService::instance();
-        (s.lock() == AxisLock::Y) ? s.clearLocks() : s.lockAxis(AxisLock::Y);
-    });
-    connect(_lockC, &QCheckBox::clicked, this, [](bool){
-        AxisFlowService& s = AxisFlowService::instance();
-        (s.lock() == AxisLock::Z) ? s.clearLocks() : s.lockAxis(AxisLock::Z);
-    });
+        if (!s.constrainEnabled()) { setLockState(); return; }   // display-only
+        s.toggleFieldLock(field);
+    };
+    connect(_lockA, &QCheckBox::clicked, this, [toggleLock](bool){ toggleLock(0); });
+    connect(_lockB, &QCheckBox::clicked, this, [toggleLock](bool){ toggleLock(1); });
+    connect(_lockC, &QCheckBox::clicked, this, [toggleLock](bool){ toggleLock(2); });
 
     // Typed values become live keyboard overrides on the solver.
     auto onEdited = [this](int idx) {
@@ -183,6 +182,8 @@ void AxisFlowPanel::wireToService()
     connect(&AxisFlowService::instance(), &AxisFlowService::pointConfirmed,
             this, [this](Base::Vector3d){
                 _entryField = -1;
+                _advanceArmed = false;
+                _advanceHold = false;
                 focusActiveField();
             });
 
@@ -210,7 +211,7 @@ void AxisFlowPanel::setValues(double x, double y, double z)
     if (!held(2)) _editC->setText(fmtCoord(z, 4));
 }
 
-void AxisFlowPanel::setValuesDist(double dist, double angle)
+void AxisFlowPanel::setValuesDist(double dist, double angle, double z)
 {
     const AxisFlowService& s = AxisFlowService::instance();
     auto held = [&](int i) {
@@ -218,22 +219,23 @@ void AxisFlowPanel::setValuesDist(double dist, double angle)
     };
     if (!held(0)) _editA->setText(fmtCoord(dist, 4));
     if (!held(1)) _editB->setText(fmtCoord(angle, 2));
+    if (!held(2)) _editC->setText(fmtCoord(z, 4));
 }
 
 void AxisFlowPanel::setMode(bool polar)
 {
     if (polar == _polar) return;   // avoid needless relayout on every update
     _polar = polar;
+    // Both modes have three fields; only the in-plane labels change.
+    // Polar keeps the Z row: distance/angle live in the plane, Z is the height
+    // above it (and with an object snap, the snapped point's real height).
     if (polar) {
         _labelA->setText(QLatin1String("D"));
         _labelB->setText(QLatin1String("A"));
-        _editC->setVisible(false); _labelC->setVisible(false); _lockC->setVisible(false);
     } else {
         _labelA->setText(QLatin1String("X"));
         _labelB->setText(QLatin1String("Y"));
-        _editC->setVisible(true); _labelC->setVisible(true); _lockC->setVisible(true);
     }
-    // Z disappears in polar: the active field must stay within range.
     setActiveField(_activeField);
     refreshActiveHighlight();
     adjustSize();
@@ -242,20 +244,32 @@ void AxisFlowPanel::setMode(bool polar)
 void AxisFlowPanel::updateFrameButton()
 {
     if (_frameBtn)
-        _frameBtn->setText(_worldFrame ? QLatin1String("World")
-                                       : QLatin1String("Local"));
+        _frameBtn->setText(_worldFrame ? tr("World")
+                                       : tr("Local"));
 }
 
-void AxisFlowPanel::setLockState(int lockedField)
+void AxisFlowPanel::setLockState()
 {
-    // A field is "locked" either because its axis is locked, or because the user
-    // typed a value into it -- in AccuDraw both pin the coordinate.
+    // Checked = the field is FIXED: a lock (checkbox/hotkey/SmartLock) and a
+    // typed value both pin the coordinate, exactly as in AccuDraw.
     const AxisFlowService& s = AxisFlowService::instance();
     QCheckBox* boxes[3] = { _lockA, _lockB, _lockC };
+    bool on[3];
+    if (!s.constrainEnabled()) {
+        // Draft adapter: mirror Draft's restriction (Snapper.mask). Draft's
+        // lock means "movement ALONG that axis", i.e. the other two coordinates
+        // are the frozen ones -- so those get the checkmarks.
+        const AxisLock dl = s.displayLock();
+        on[0] = (dl == AxisLock::Y || dl == AxisLock::Z);
+        on[1] = (dl == AxisLock::X || dl == AxisLock::Z);
+        on[2] = (dl == AxisLock::X || dl == AxisLock::Y);
+    } else {
+        for (int i = 0; i < 3; ++i)
+            on[i] = s.hasKeyValue(i);
+    }
     for (int i = 0; i < 3; ++i) {
-        const bool on = (lockedField == i) || s.hasKeyValue(i);
         QSignalBlocker block(boxes[i]);   // programmatic change must not re-enter
-        boxes[i]->setChecked(on);
+        boxes[i]->setChecked(on[i]);
     }
 }
 
@@ -298,6 +312,7 @@ void AxisFlowPanel::pushFieldValue(int index, const QString& text)
     const QString trimmed = text.trimmed();
     if (trimmed.isEmpty()) {
         // Clearing a field releases ONLY its own override; the others stay put.
+        _advanceArmed = false;             // entry abandoned
         s.clearKeyValue(index);
         return;
     }
@@ -305,6 +320,16 @@ void AxisFlowPanel::pushFieldValue(int index, const QString& text)
     double v = parseQuantity(text);
     if (std::isnan(v))
         return;   // partial/invalid entry ("-", "1,") -- keep the last override
+
+    // Focus advance on movement: every accepted keystroke into an in-plane
+    // field re-arms the trigger and re-anchors it at the CURRENT cursor, so
+    // only movement after the last keystroke counts as "done typing".
+    if (index == 0 || index == 1) {
+        const Base::Vector3d l = s.localOffset();
+        _advanceArmed  = AxisFlowSettings::instance().focusAdvanceOnMove();
+        _advanceAnchorX = l.x;
+        _advanceAnchorY = l.y;
+    }
 
     const bool rect = (s.mode() == CompassMode::Rectangular);
 
@@ -324,9 +349,11 @@ void AxisFlowPanel::pushFieldValue(int index, const QString& text)
     // typing "5" locks X = -5 (and the live line follows). An explicit sign the
     // user typed always wins; polar distance/angle are entered as-is. The rule
     // itself lives in AxisFlowEntry.h so it can be unit-tested without the GUI.
-    const bool explicitSign = trimmed.startsWith(QLatin1Char('-'))
-                           || trimmed.startsWith(QLatin1Char('+'));
-    if (rect) {
+    // Optional since the "Smart negative direction" setting: when it is off,
+    // the typed sign is used literally, whichever way the cursor points.
+    if (rect && AxisFlowSettings::instance().smartNegativeDirection()) {
+        const bool explicitSign = trimmed.startsWith(QLatin1Char('-'))
+                               || trimmed.startsWith(QLatin1Char('+'));
         const Base::Vector3d l = s.localOffset();   // raw cursor direction
         const double dir = (index == 0) ? l.x : (index == 1) ? l.y : l.z;
         v = signedByDirection(v, dir, explicitSign);
@@ -375,7 +402,7 @@ void AxisFlowPanel::reformatField(int index)
 
 void AxisFlowPanel::setActiveField(int index)
 {
-    const int maxField = _polar ? 1 : 2;   // polar has no Z row
+    const int maxField = 2;                // D/A/Z or X/Y/Z -- always three
     if (index < 0) index = 0;
     if (index > maxField) index = maxField;
     if (index == _activeField) return;
@@ -410,8 +437,38 @@ void AxisFlowPanel::focusActiveField()
 
 void AxisFlowPanel::cycleActiveField()
 {
-    const int count = _polar ? 2 : 3;
-    setActiveField((_activeField + 1) % count);
+    _advanceHold = false;              // an explicit Tab overrides the hold
+    setActiveField((_activeField + 1) % 3);
+}
+
+void AxisFlowPanel::maybeAdvanceFocus()
+{
+    if (!_advanceArmed)
+        return;
+    // The entry may have ended some other way (Enter, Tab, blur, Escape) --
+    // then there is nothing to hand over; drop the stale trigger.
+    if (_entryField != 0 && _entryField != 1) {
+        _advanceArmed = false;
+        return;
+    }
+
+    AxisFlowService& s = AxisFlowService::instance();
+    const Base::Vector3d l = s.localOffset();
+    if (!focusAdvanceExceeded(l.x - _advanceAnchorX, l.y - _advanceAnchorY,
+                              s.viewScale()))
+        return;   // jitter, not a deliberate move
+
+    // The typed value stays as the override; the entry itself is finished
+    // (round-on-blur formatting included) and the caret moves to the adjacent
+    // in-plane field: X <-> Y (D <-> A in radial mode).
+    const int from = _entryField;
+    const int to   = 1 - from;
+    _entryField    = -1;
+    _advanceArmed  = false;
+    _advanceHold   = true;   // keep the caret in 'to' despite the nearest axis
+    reformatField(from);
+    setActiveField(to);
+    focusActiveField();
 }
 
 void AxisFlowPanel::updateActiveFieldFromCursor()
@@ -419,6 +476,11 @@ void AxisFlowPanel::updateActiveFieldFromCursor()
     // Frozen while the user is typing: the entry must not jump to another field
     // because the cursor drifted past the diagonal.
     if (_entryField >= 0)
+        return;
+
+    // Frozen after a focus advance too: the hand-over said "now type Y" -- the
+    // cursor still hugging the X axis must not snatch the caret back.
+    if (_advanceHold)
         return;
 
     // Polar has no meaningful "nearest axis": distance stays the default target.
@@ -524,6 +586,8 @@ bool AxisFlowPanel::clearEntry()
 
 void AxisFlowPanel::cancelInput()
 {
+    _advanceArmed = false;
+    _advanceHold  = false;
     AxisFlowService& s = AxisFlowService::instance();
 
     // Layer 1: an entry is being typed -> drop it and release its override.
@@ -701,15 +765,15 @@ void AxisFlowPanel::onServiceState()
 {
     AxisFlowService& s = AxisFlowService::instance();
     setMode(s.mode() == CompassMode::Polar);
+    setLockState();
 
-    int lf = -1;
-    switch (s.lock()) {
-    case AxisLock::X: lf = 0; break;
-    case AxisLock::Y: lf = 1; break;
-    case AxisLock::Z: lf = 2; break;
-    default: break;
-    }
-    setLockState(lf);
+    // A field frozen by a lock must immediately SHOW the captured value
+    // (SmartLock freezes Y/Z at 0 while the read-out still shows the cursor).
+    // The field being typed into is left alone -- reformat would rewrite the
+    // entry under the user's fingers.
+    for (int i = 0; i < 3; ++i)
+        if (i != _entryField && s.hasKeyValue(i))
+            reformatField(i);
 
     // When every override is gone (Escape), let the read-out take the fields
     // back: while an edit keeps focus, setValues() deliberately will not touch
@@ -724,6 +788,10 @@ void AxisFlowPanel::onServiceState()
 
 void AxisFlowPanel::onCursorMoved(Base::Vector3d /*solved*/)
 {
+    // Focus advance on movement runs first: it may just have FINISHED the
+    // entry, in which case the nearest-axis logic below is free again.
+    maybeAdvanceFocus();
+
     // The active field follows the axis the cursor leans towards (frozen while
     // typing -- see updateActiveFieldFromCursor).
     updateActiveFieldFromCursor();
@@ -744,11 +812,11 @@ void AxisFlowPanel::onCursorMoved(Base::Vector3d /*solved*/)
         if (snapped) {
             const double dist  = std::sqrt(ix.lx * ix.lx + ix.ly * ix.ly);
             const double angle = std::atan2(ix.ly, ix.lx) * 180.0 / M_PI;
-            setValuesDist(dist, angle);
+            setValuesDist(dist, angle, ix.lz);
         } else {
             // Polar is inherently a relative distance/angle; the frame toggle
             // only affects the rectangular read-out.
-            setValuesDist(s.distance(), s.angleDeg());
+            setValuesDist(s.distance(), s.angleDeg(), s.localOffset().z);
         }
     } else {
         const Base::Vector3d l = snapped

@@ -23,6 +23,7 @@
 #include <Inventor/SbLine.h>
 
 #include <Base/Vector3D.h>
+#include <Base/Interpreter.h>   // PyGILStateLocker + Python.h
 
 #include <QtGui/QKeyEvent>   // Qt::Key_*
 
@@ -65,6 +66,7 @@ void AxisFlowTool::activate(bool withPositionSource)
     connect(&svc, &AxisFlowService::cancelRequested,  this, &AxisFlowTool::cancelInput);
     connect(&svc, &AxisFlowService::finishRequested,  this, &AxisFlowTool::onFinishLine);
     connect(&svc, &AxisFlowService::confirmRequested, this, &AxisFlowTool::confirmPoint);
+    connect(&svc, &AxisFlowService::alignToViewRequested, this, &AxisFlowTool::alignPlaneToView);
     connect(&AxisFlowSettings::instance(), &AxisFlowSettings::changed,
             this, &AxisFlowTool::onSettingsChanged);
 
@@ -133,6 +135,10 @@ void AxisFlowTool::deactivate()
 
     AxisFlowPanel::instance()->setOwnsInput(false);
 
+    // Drop any live object snap and take Draft's snap markers off the screen.
+    AxisFlowService::instance().clearSnap();
+    hideSnapMarkers();
+
     AxisFlowService::instance().deactivate();
 
     detachCameraSensor();
@@ -176,12 +182,30 @@ void AxisFlowTool::handleCoinEvent(SoEventCallback* node)
 
     if (event->isOfType(SoLocation2Event::getClassTypeId())) {
         const auto* me = static_cast<const SoLocation2Event*>(event);
-        SbVec3f worldPt = unprojectToCompassPlane(me->getPosition());
-        Base::Vector3d raw(worldPt[0], worldPt[1], worldPt[2]);
+        AxisFlowService& svc = AxisFlowService::instance();
+
         // Push the current pixel scale first, so indexing's pixel tolerances are
         // evaluated against THIS frame's zoom during the solve below.
-        AxisFlowService::instance().setViewScale(computeWorldPerPixel());
-        AxisFlowService::instance().updateCursor(raw, nullptr);   // -> cursorMoved
+        svc.setViewScale(computeWorldPerPixel());
+
+        // Object snapping (Draft's Snapper) takes precedence over the plain
+        // projection: a snapped point is an explicit geometric target, and it
+        // may legitimately sit off the compass plane (its Z then shows up in
+        // the panel). Falls back to the plane when nothing is snapped.
+        Base::Vector3d snapped;
+        if (AxisFlowSettings::instance().useSnapping()
+            && querySnap(me->getPosition(), snapped)) {
+            svc.setSnapPoint(snapped);
+        }
+        else {
+            svc.clearSnap();
+        }
+
+        // The raw cursor is still needed even while snapped: the axis hold
+        // decides which axis to ride from where the CURSOR is, not the snap.
+        SbVec3f worldPt = unprojectToCompassPlane(me->getPosition());
+        Base::Vector3d raw(worldPt[0], worldPt[1], worldPt[2]);
+        svc.updateCursor(raw, nullptr);   // -> cursorMoved
         node->setHandled();
         return;
     }
@@ -219,6 +243,68 @@ void AxisFlowTool::handleCoinEvent(SoEventCallback* node)
 }
 
 // ---------------------------------------------------------------------------
+
+bool AxisFlowTool::querySnap(const SbVec2s& pixel, Base::Vector3d& out)
+{
+    // The Snapper is Python, so the query goes through a one-function bridge
+    // (axisflow_snapping.snap). Marshalling plain floats keeps this side free
+    // of App.Vector construction. The module object is cached: importing on
+    // every mouse move would be needlessly expensive.
+    Base::PyGILStateLocker lock;
+
+    static PyObject* s_fn = nullptr;
+    static bool s_tried = false;
+    if (!s_tried) {
+        s_tried = true;
+        PyObject* mod = PyImport_ImportModule("axisflow_snapping");
+        if (mod) {
+            s_fn = PyObject_GetAttrString(mod, "snap");   // new ref, kept
+            Py_DECREF(mod);
+        }
+        PyErr_Clear();
+    }
+    if (!s_fn)
+        return false;
+
+    // Previous point: Draft needs it for extension / parallel / perpendicular.
+    const Base::Vector3d o = AxisFlowService::instance().origin();
+    // During a polyline the origin IS the previous point, which is exactly what
+    // Draft wants for extension / parallel / perpendicular snaps.
+    const bool hasOrigin = AxisFlowService::instance().isActive();
+
+    PyObject* res = PyObject_CallFunction(s_fn, "iidddi",
+                                          int(pixel[0]), int(pixel[1]),
+                                          o.x, o.y, o.z, hasOrigin ? 1 : 0);
+    if (!res) {
+        PyErr_Clear();       // never let a Python error break the tool
+        return false;
+    }
+
+    double px = 0.0, py = 0.0, pz = 0.0;
+    int hit = 0;
+    const bool ok = (PyArg_ParseTuple(res, "dddi", &px, &py, &pz, &hit) != 0);
+    if (!ok)
+        PyErr_Clear();
+    Py_DECREF(res);
+
+    if (!ok || hit == 0)
+        return false;
+
+    out = Base::Vector3d(px, py, pz);
+    return true;
+}
+
+void AxisFlowTool::hideSnapMarkers()
+{
+    Base::PyGILStateLocker lock;
+    PyObject* mod = PyImport_ImportModule("axisflow_snapping");
+    if (mod) {
+        PyObject* r = PyObject_CallMethod(mod, "hide", nullptr);
+        Py_XDECREF(r);
+        Py_DECREF(mod);
+    }
+    PyErr_Clear();
+}
 
 SbVec3f AxisFlowTool::unprojectToCompassPlane(const SbVec2s& pixel)
 {
@@ -266,6 +352,9 @@ void AxisFlowTool::beginInput(bool continueMode)
     _state = InputState::Idle;
     AxisFlowService::instance().clearLocks();
     AxisFlowService::instance().clearKeyValues();
+    // The origin still points at the LAST session's point: the first confirm
+    // of this session must not rotate the compass along that stale segment.
+    AxisFlowService::instance().clearFollowReference();
 }
 
 void AxisFlowTool::setBasePoint(const Base::Vector3d& world)
@@ -506,6 +595,35 @@ void AxisFlowTool::onServiceStateChanged()
     // pushed by an adapter or by setPlane() from Python.
     applyModeToUi();
     syncCompassPlane();
+
+    // The origin can move WITHOUT a mouse move (SetOrigin, confirm from the
+    // API): re-anchor the compass now instead of waiting for the next cursor
+    // event.
+    const Base::Vector3d o = AxisFlowService::instance().origin();
+    _compass->setOrigin(SbVec3f(float(o.x), float(o.y), float(o.z)));
+}
+
+void AxisFlowTool::alignPlaneToView()
+{
+    // Camera basis in world space: right / up / back (Coin cameras look down
+    // their local -Z, so +Z points back at the viewer -- that is our normal).
+    if (!_view) return;
+    Gui::View3DInventorViewer* viewer = _view->getViewer();
+    if (!viewer) return;
+    SoRenderManager* rm = viewer->getSoRenderManager();
+    if (!rm) return;
+    SoCamera* cam = rm->getCamera();
+    if (!cam) return;
+
+    const SbRotation rot = cam->orientation.getValue();
+    SbVec3f right(1, 0, 0), up(0, 1, 0), back(0, 0, 1);
+    rot.multVec(right, right);
+    rot.multVec(up, up);
+    rot.multVec(back, back);
+    AxisFlowService::instance().setPlane(
+        Base::Vector3d(right[0], right[1], right[2]),
+        Base::Vector3d(up[0],    up[1],    up[2]),
+        Base::Vector3d(back[0],  back[1],  back[2]));
 }
 
 void AxisFlowTool::onActiveChanged(bool active)

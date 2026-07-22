@@ -1,5 +1,7 @@
 #include "PreCompiled.h"
 
+#include <algorithm>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -44,6 +46,13 @@ static AxisAction actionFromString(const std::string& s)
     if (s == "lockx")      return AxisAction::LockX;
     if (s == "locky")      return AxisAction::LockY;
     if (s == "lockz")      return AxisAction::LockZ;
+    if (s == "lockd")      return AxisAction::LockD;
+    if (s == "setorigin")    return AxisAction::SetOrigin;
+    if (s == "rotatetop")    return AxisAction::RotateTop;
+    if (s == "rotatefront")  return AxisAction::RotateFront;
+    if (s == "rotateside")   return AxisAction::RotateSide;
+    if (s == "rotatebyview") return AxisAction::RotateByView;
+    if (s == "rotatecycle")  return AxisAction::RotateCycle;
     if (s == "clearlocks") return AxisAction::ClearLocks;
     if (s == "cancelentry") return AxisAction::CancelEntry;
     if (s == "cancelcommand") return AxisAction::CancelCommand;
@@ -183,6 +192,31 @@ PyObject* axisflow_getMode(PyObject*, PyObject*)
 
 PyObject* axisflow_lockAxis(PyObject*, PyObject* args)
 {
+    // Freeze a coordinate slot at its CURRENT solved value (idempotent set):
+    // the frozen field stops following the cursor, the free ones keep moving.
+    // 'd'/'a' freeze the polar distance/angle slots. 'none' releases all locks.
+    const char* a = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &a))
+        return nullptr;
+    std::string s(a ? a : "");
+    AxisFlowService& svc = AxisFlowService::instance();
+    if      (s == "x" || s == "X") svc.setSlotLock(AxisFlowService::LockSlot::X);
+    else if (s == "y" || s == "Y") svc.setSlotLock(AxisFlowService::LockSlot::Y);
+    else if (s == "z" || s == "Z") svc.setSlotLock(AxisFlowService::LockSlot::Z);
+    else if (s == "d" || s == "D") svc.setSlotLock(AxisFlowService::LockSlot::Dist);
+    else if (s == "a" || s == "A") svc.setSlotLock(AxisFlowService::LockSlot::Angle);
+    else if (s == "none")          svc.clearLocks();
+    else {
+        PyErr_SetString(PyExc_ValueError, "lockAxis expects 'x'|'y'|'z'|'d'|'a'|'none'");
+        return nullptr;
+    }
+    Py_RETURN_NONE;
+}
+
+PyObject* axisflow_setDisplayLock(PyObject*, PyObject* args)
+{
+    // Adapter-only: mirror Draft's Snapper.mask for display. No constraint of
+    // our own is applied (and none must be -- Draft already constrained).
     const char* a = nullptr;
     if (!PyArg_ParseTuple(args, "s", &a))
         return nullptr;
@@ -191,7 +225,7 @@ PyObject* axisflow_lockAxis(PyObject*, PyObject* args)
     if      (s == "x" || s == "X") lk = AxisLock::X;
     else if (s == "y" || s == "Y") lk = AxisLock::Y;
     else if (s == "z" || s == "Z") lk = AxisLock::Z;
-    AxisFlowService::instance().lockAxis(lk);
+    AxisFlowService::instance().setDisplayLock(lk);
     Py_RETURN_NONE;
 }
 
@@ -240,14 +274,17 @@ PyObject* axisflow_getState(PyObject*, PyObject*)
         d.setItem("active", Py::Boolean(svc.isActive()));
         d.setItem("mode",   Py::String(svc.mode() == CompassMode::Polar ? "polar" : "rect"));
 
-        const char* lockStr = "none";
-        switch (svc.lock()) {
-        case AxisLock::X: lockStr = "x"; break;
-        case AxisLock::Y: lockStr = "y"; break;
-        case AxisLock::Z: lockStr = "z"; break;
-        default: break;
-        }
-        d.setItem("lock",        Py::String(lockStr));
+        // Which slots are frozen by a LOCK (checkbox / hotkey / SmartLock).
+        // A typed value also fixes its field but is not reported here; use
+        // keyValue-style queries for that.
+        using LS = AxisFlowService::LockSlot;
+        Py::Dict locks;
+        locks.setItem("x", Py::Boolean(svc.slotLocked(LS::X)));
+        locks.setItem("y", Py::Boolean(svc.slotLocked(LS::Y)));
+        locks.setItem("z", Py::Boolean(svc.slotLocked(LS::Z)));
+        locks.setItem("d", Py::Boolean(svc.slotLocked(LS::Dist)));
+        locks.setItem("a", Py::Boolean(svc.slotLocked(LS::Angle)));
+        d.setItem("locks",       locks);
         d.setItem("origin",      Py::Vector(svc.origin()));
         d.setItem("planeNormal", Py::Vector(svc.planeNormal()));
         d.setItem("distance",    Py::Float(svc.distance()));
@@ -258,6 +295,7 @@ PyObject* axisflow_getState(PyObject*, PyObject*)
         const IndexingResult ix = svc.currentIndexing();
         d.setItem("indexCandidatePoint", Py::Boolean(ix.distanceActive));
         d.setItem("indexCandidateAxis",  Py::Boolean(ix.axisActive));
+        d.setItem("snapActive",  Py::Boolean(svc.snapActive()));
         return Py::new_reference_to(d);
     }
     catch (Py::Exception&) {
@@ -405,6 +443,58 @@ PyObject* axisflow_endSession(PyObject*, PyObject*)
     Py_RETURN_NONE;
 }
 
+PyObject* axisflow_loadHotkeyDefaults(PyObject*, PyObject* args)
+{
+    const char* path = nullptr;
+    if (!PyArg_ParseTuple(args, "s", &path))
+        return nullptr;
+    // Defaults layer: built-in -> this file -> the user's stored bindings.
+    AxisFlowService::instance().applyHotkeyDefaultsFile(path ? path : "");
+    Py_RETURN_NONE;
+}
+
+PyObject* axisflow_setHotkeys(PyObject*, PyObject* args)
+{
+    const char* action = nullptr;
+    PyObject*   seq    = nullptr;
+    int         persist = 1;
+    if (!PyArg_ParseTuple(args, "sO|p", &action, &seq, &persist))
+        return nullptr;
+
+    // Accept either canonical ("ConfirmPoint") or lower-case ("confirmpoint").
+    std::string s(action ? action : "");
+    std::transform(s.begin(), s.end(), s.begin(),
+                   [](unsigned char c){ return static_cast<char>(::tolower(c)); });
+    const AxisAction a = actionFromString(s);
+    if (a == AxisAction::None) {
+        PyErr_SetString(PyExc_ValueError, "unknown AxisFlow action name");
+        return nullptr;
+    }
+
+    PyObject* fast = PySequence_Fast(seq, "keys must be a sequence of Qt key codes");
+    if (!fast)
+        return nullptr;
+
+    std::vector<int> keys;
+    const Py_ssize_t n = PySequence_Fast_GET_SIZE(fast);
+    for (Py_ssize_t i = 0; i < n; ++i) {
+        PyObject* item = PySequence_Fast_GET_ITEM(fast, i);   // borrowed
+        const long v = PyLong_AsLong(item);
+        if (v == -1 && PyErr_Occurred()) { Py_DECREF(fast); return nullptr; }
+        if (v > 0) keys.push_back(static_cast<int>(v));
+    }
+    Py_DECREF(fast);
+
+    AxisFlowService::instance().setHotkeys(a, keys, persist != 0);
+    Py_RETURN_NONE;
+}
+
+PyObject* axisflow_resetHotkeys(PyObject*, PyObject*)
+{
+    AxisFlowService::instance().resetHotkeys();
+    Py_RETURN_NONE;
+}
+
 PyObject* axisflow_setHotkey(PyObject*, PyObject* args)
 {
     int qtKey = 0;
@@ -450,6 +540,11 @@ PyObject* axisflow_getSettings(PyObject*, PyObject*)
     setItem("liveLineTransparency", PyFloat_FromDouble(s.liveLineTransparency()));
     setItem("indexingAxisWeight",  PyLong_FromLong(s.indexingAxisWeight()));
     setItem("indexingAxisTransparency", PyFloat_FromDouble(s.indexingAxisTransparency()));
+    setItem("useSnapping",      PyBool_FromLong(s.useSnapping() ? 1 : 0));
+    setItem("smartNegativeDirection", PyBool_FromLong(s.smartNegativeDirection() ? 1 : 0));
+    setItem("focusAdvanceOnMove", PyBool_FromLong(s.focusAdvanceOnMove() ? 1 : 0));
+    setItem("compassFollowDirection", PyLong_FromLong(s.compassFollowDirection()));
+    setItem("compassRotateAnimation", PyFloat_FromDouble(s.compassRotateAnimation()));
 
     // Hotkeys as {'SmartLock': [16777220, 16777221], ...}; [] means unbound.
     PyObject* hk = PyDict_New();
@@ -500,6 +595,11 @@ PyObject* axisflow_setSetting(PyObject*, PyObject* args)
     else if (k == "liveLineTransparency") s.setLiveLineTransparency(PyFloat_AsDouble(val));
     else if (k == "indexingAxisWeight")  s.setIndexingAxisWeight(static_cast<int>(PyLong_AsLong(val)));
     else if (k == "indexingAxisTransparency") s.setIndexingAxisTransparency(PyFloat_AsDouble(val));
+    else if (k == "useSnapping")       s.setUseSnapping(PyObject_IsTrue(val) == 1);
+    else if (k == "smartNegativeDirection") s.setSmartNegativeDirection(PyObject_IsTrue(val) == 1);
+    else if (k == "focusAdvanceOnMove") s.setFocusAdvanceOnMove(PyObject_IsTrue(val) == 1);
+    else if (k == "compassFollowDirection") s.setCompassFollowDirection(static_cast<int>(PyLong_AsLong(val)));
+    else if (k == "compassRotateAnimation") s.setCompassRotateAnimation(PyFloat_AsDouble(val));
     else {
         PyErr_Format(PyExc_KeyError, "unknown AxisFlow setting: %s", k.c_str());
         return nullptr;
@@ -588,8 +688,20 @@ PyMethodDef AxisFlowMethods[] = {
      "continuous=False fires once; True fires per point until cancel."},
     {"endSession",     axisflow_endSession,     METH_NOARGS,
      "endSession(). Tear down the UI session and deactivate the service."},
+    {"loadHotkeyDefaults", axisflow_loadHotkeyDefaults, METH_VARARGS,
+     "loadHotkeyDefaults(path). Read the default key layout from an INI file "
+     "(hotkeys.ini) and re-apply built-in -> file -> user bindings. Call again "
+     "to pick up edits without restarting FreeCAD."},
+    {"setHotkeys",     axisflow_setHotkeys,     METH_VARARGS,
+     "setHotkeys(action, [qtKeyCode, ...], persist=True). Bind an action to a "
+     "whole list of keys at once, replacing its previous ones. An empty list "
+     "unbinds the action. Action names as in getSettings()['hotkeys']."},
+    {"resetHotkeys",   axisflow_resetHotkeys,   METH_NOARGS,
+     "resetHotkeys(). Forget the user's key overrides and fall back to the "
+     "defaults (built-in layout plus hotkeys.ini). Other settings untouched."},
     {"setHotkey",      axisflow_setHotkey,      METH_VARARGS,
-     "setHotkey(qtKeyCode, 'toggleactive'|'togglemode'|'smartlock'|'lockx'|'locky'|'lockz'"
+     "setHotkey(qtKeyCode, 'toggleactive'|'togglemode'|'smartlock'|'lockx'|'locky'|'lockz'|'lockd'"
+     "|'setorigin'|'rotatetop'|'rotatefront'|'rotateside'|'rotatebyview'|'rotatecycle'"
      "|'clearlocks'|'cancelentry'|'cancelcommand'|'finishline'|'confirmpoint'|'none'[, persist=True])."},
     {"confirm",        axisflow_confirm,        METH_VARARGS,
      "confirm(point). Commit a point as the new compass origin."},
@@ -602,9 +714,13 @@ PyMethodDef AxisFlowMethods[] = {
     {"getMode",        axisflow_getMode,        METH_NOARGS,
      "getMode() -> 'rect'|'polar'."},
     {"lockAxis",       axisflow_lockAxis,       METH_VARARGS,
-     "lockAxis('x'|'y'|'z'|'none')."},
+     "lockAxis('x'|'y'|'z'|'d'|'a'|'none'). Freeze that coordinate field at its "
+     "current value ('none' releases all locks)."},
+    {"setDisplayLock", axisflow_setDisplayLock, METH_VARARGS,
+     "setDisplayLock('x'|'y'|'z'|'none'). Adapter-only: mirror Draft's axis "
+     "restriction in the panel checkboxes (display, no constraint)."},
     {"clearLocks",     axisflow_clearLocks,     METH_NOARGS,
-     "clearLocks(). Remove any axis lock."},
+     "clearLocks(). Release every locked field (typed values survive)."},
     {"setKeyValue",    axisflow_setKeyValue,    METH_VARARGS,
      "setKeyValue(field, value). rect: 0=X 1=Y 2=Z ; polar: 0=dist 1=angle 2=Z."},
     {"clearKeyValues", axisflow_clearKeyValues, METH_NOARGS,

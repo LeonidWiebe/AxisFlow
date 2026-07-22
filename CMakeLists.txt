@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(AxisFlow VERSION 0.1.2 LANGUAGES CXX)
+project(AxisFlow VERSION 0.1.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -228,7 +228,17 @@ install(FILES InitGui.py        DESTINATION "${FREECAD_MOD_DIR}")
 install(FILES axisflow_snap.py  DESTINATION "${FREECAD_MOD_DIR}")
 install(FILES axisflow_demo.py  DESTINATION "${FREECAD_MOD_DIR}")
 install(FILES axisflow_settings.py DESTINATION "${FREECAD_MOD_DIR}")
+install(FILES axisflow_snapping.py DESTINATION "${FREECAD_MOD_DIR}")
+install(FILES package.xml       DESTINATION "${FREECAD_MOD_DIR}")
+# Editable default hotkey layout, read at start-up by InitGui.py. Deliberately a
+# loose file (NOT in the .qrc): the whole point is changing it without a rebuild.
+install(FILES hotkeys.ini       DESTINATION "${FREECAD_MOD_DIR}")
 install(DIRECTORY Resources     DESTINATION "${FREECAD_MOD_DIR}")
+# Compiled translations (AxisFlow_<lang>.qm). InitGui.py registers this folder
+# via addLanguagePath(); FreeCAD then loads the .qm for its current language.
+# Only .qm ship (the .ts are source). Run update_translations.py to (re)build them.
+install(DIRECTORY translations  DESTINATION "${FREECAD_MOD_DIR}"
+        FILES_MATCHING PATTERN "*.qm")
 
 message(STATUS "=== AxisFlow build config ===")
 message(STATUS "  Qt6 dir     : ${Qt6_DIR}")

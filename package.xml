@@ -5,7 +5,7 @@
     Dynamic precision drawing assistant for FreeCAD: an AccuDraw-style compass
     with unit-aware coordinate input, axis locks, and a live guide line.
   </description>
-  <version>0.1.2</version>
+  <version>0.1.3</version>
   <date>2026-07-17</date>
   <maintainer email="[email protected]">Leonid Wiebe</maintainer>
   <license file="LICENSE">LGPL-2.1-or-later</license>
@@ -20,6 +20,11 @@
     <workbench>
       <classname>AxisFlowWorkbenchPy</classname>
       <name>AxisFlow</name>
+      <!-- InitGui.py sits in the package root, not in a sub-folder. Without
+           this, FreeCAD falls back to the workbench name as the sub-directory
+           and looks in Mod/AxisFlow/AxisFlow/ (see FreeCADGuiInit.py,
+           processMetadataFile). -->
+      <subdirectory>./</subdirectory>
       <icon>Resources/icons/AxisFlow.svg</icon>
       <description>AccuDraw-style dynamic coordinate input for FreeCAD.</description>
     </workbench>

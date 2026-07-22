@@ -15,7 +15,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 REM ---- edit per release ----
-set "VERSION=0.1.2"
+set "VERSION=0.1.3"
 set "CONFIG=RelWithDebInfo"
 set "ZIPNAME=AxisFlow-%VERSION%-win64-FC1.1.zip"
 REM --------------------------

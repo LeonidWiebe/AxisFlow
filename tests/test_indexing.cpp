@@ -20,6 +20,7 @@ IndexingInput mk(double lx, double ly, double lz)
 {
     IndexingInput in;
     in.lx = lx; in.ly = ly; in.lz = lz;
+    in.cursorLx = lx; in.cursorLy = ly;   // no snap: cursor == point
     in.indexedDistance = NaN;
     in.tolerancePx = 8;
     in.worldPerPixel = 1.0;   // 1 world unit == 1 pixel -> offsets read directly
@@ -28,6 +29,7 @@ IndexingInput mk(double lx, double ly, double lz)
     in.localFrame = true;
     in.axisLocked = false;
     in.entryActive = false;
+    in.snapActive = false;
     return in;
 }
 
@@ -258,4 +260,126 @@ TEST(SolverIndexing, DistanceSnapWorksInPolarMode)
     s.setViewScale(1.0);
     Base::Vector3d p = s.getSolvedPoint();
     EXPECT_NEAR(std::sqrt(p.x*p.x + p.y*p.y), 51.0, 1e-9);
+}
+
+// ---- object snapping vs indexing -----------------------------------------
+
+TEST(Indexing, SnapBeatsIndexingWhenCursorIsOffAxis)
+{
+    // A snap is authoritative UNLESS the cursor was riding an axis (see the
+    // axis-hold tests below): here the cursor is far from both axes, so the
+    // point lands exactly on the snap and every candidate goes dark.
+    IndexingInput in = mk(50, 30, 7);
+    in.cursorLx = 60; in.cursorLy = 60;    // cursor far from both axes
+    in.useAxis = true; in.useDistance = true; in.indexedDistance = 60.0;
+    in.snapActive = true;                   // ... and a snap fired
+    IndexingResult r = computeIndexing(in);
+    EXPECT_FALSE(r.axisActive);
+    EXPECT_FALSE(r.distanceActive);
+    EXPECT_DOUBLE_EQ(r.lx, 50.0);
+    EXPECT_DOUBLE_EQ(r.ly, 30.0);
+    EXPECT_DOUBLE_EQ(r.lz, 7.0);            // 3-D snap height preserved
+}
+
+TEST(Indexing, AxisHoldProjectsTheSnapOntoTheRiddenAxis)
+{
+    // The point always stays on the axis the cursor rides: with axis indexing
+    // on, a snap contributes its along-axis coordinate instead of pulling the
+    // point off the axis. (Formerly the opt-in "SmartLock" snapping setting;
+    // now unconditional.)
+    IndexingInput in = mk(50, 30, 7);
+    in.cursorLx = 100; in.cursorLy = 3;     // cursor 3 px from the X axis
+    in.useAxis = true; in.snapActive = true;
+    IndexingResult r = computeIndexing(in);
+    EXPECT_TRUE(r.axisActive);
+    EXPECT_EQ(r.axis, IndexAxis::X);
+    EXPECT_DOUBLE_EQ(r.lx, 50.0);           // distance taken from the snap
+    EXPECT_DOUBLE_EQ(r.ly, 0.0);            // perpendicular onto the axis line
+    EXPECT_DOUBLE_EQ(r.lz, 0.0);
+}
+
+TEST(Indexing, AxisHoldOnlyWhenCursorHuggedAnAxis)
+{
+    IndexingInput in = mk(50, 30, 7);
+    in.cursorLx = 60; in.cursorLy = 60;     // cursor far from both axes
+    in.useAxis = true; in.snapActive = true;
+    EXPECT_FALSE(computeIndexing(in).axisActive);
+}
+
+TEST(SolverIndexing, SnapPointDrivesSolvedPointAndKeepsZ)
+{
+    AxisFlowSolver s;
+    s.setRawPoint(V(10, 10, 0));
+    s.setSnapPoint(V(30, 40, 7));
+    EXPECT_TRUE(s.snapActive());
+    Base::Vector3d p = s.getSolvedPoint();
+    EXPECT_DOUBLE_EQ(p.x, 30.0);
+    EXPECT_DOUBLE_EQ(p.y, 40.0);
+    EXPECT_DOUBLE_EQ(p.z, 7.0);
+    s.clearSnap();
+    EXPECT_DOUBLE_EQ(s.getSolvedPoint().x, 10.0);
+}
+
+TEST(SolverIndexing, FieldLocksProjectTheSnappedPoint)
+{
+    // With an object snap live, frozen fields override the snapped components:
+    // Y and Z locked at 0 project the snap onto the compass X axis.
+    AxisFlowSolver s;
+    s.setRawPoint(V(0, 0, 0));
+    s.setSnapPoint(V(30, 40, 7));
+    s.lockValueY(0.0);
+    s.lockValueZ(0.0);
+    Base::Vector3d p = s.getSolvedPoint();
+    EXPECT_DOUBLE_EQ(p.x, 30.0);
+    EXPECT_DOUBLE_EQ(p.y, 0.0);
+    EXPECT_DOUBLE_EQ(p.z, 0.0);
+}
+
+TEST(SolverIndexing, AxisHoldEndToEnd)
+{
+    AxisFlowSolver s;
+    s.setUseAxisIndexing(true);
+    s.setIndexTolerancePx(8);
+    s.setViewScale(1.0);
+    s.setRawPoint(V(100, 3, 0));      // cursor hugging X
+    s.setSnapPoint(V(50, 30, 7));     // snap well off the axis
+    EXPECT_TRUE(s.indexing().axisActive);
+    Base::Vector3d p = s.getSolvedPoint();
+    EXPECT_DOUBLE_EQ(p.x, 50.0);
+    EXPECT_DOUBLE_EQ(p.y, 0.0);
+    EXPECT_DOUBLE_EQ(p.z, 0.0);
+}
+
+TEST(Indexing, LockedOnAxisLightsTheCandidateEvenWithIndexingDisabled)
+{
+    IndexingInput in;
+    in.lx = 5; in.ly = 0; in.lz = 0;
+    in.cursorLx = 5; in.cursorLy = 0;
+    in.indexedDistance = std::numeric_limits<double>::quiet_NaN();
+    in.tolerancePx = 0; in.worldPerPixel = 0.0;   // indexing globally off
+    in.useDistance = false; in.useAxis = false;
+    in.localFrame = false;                        // even in the world frame
+    in.axisLocked = true; in.entryActive = false;
+    in.snapActive = false;
+    in.lockedOnAxisX = true;                      // lock feedback still shows
+    const IndexingResult r = computeIndexing(in);
+    EXPECT_TRUE(r.axisActive);
+    EXPECT_EQ(r.axis, IndexAxis::X);
+    EXPECT_EQ(r.kind, IndexKind::Axis);
+}
+
+TEST(SolverIndexing, LockCandidateAxisSurvivesASnap)
+{
+    AxisFlowSolver s;
+    s.setRawPoint(V(10, 0, 0));
+    s.lockValueY(0.0);                  // SmartLock pair: riding the X axis
+    s.lockValueZ(0.0);
+    s.setSnapPoint(V(30, 40, 7));       // snap far off the axis
+    const IndexingResult r = s.indexing();
+    EXPECT_TRUE(r.axisActive);
+    EXPECT_EQ(r.axis, IndexAxis::X);
+    Base::Vector3d p = s.getSolvedPoint();
+    EXPECT_DOUBLE_EQ(p.x, 30.0);        // snapped x survives, y/z stay frozen
+    EXPECT_DOUBLE_EQ(p.y, 0.0);
+    EXPECT_DOUBLE_EQ(p.z, 0.0);
 }

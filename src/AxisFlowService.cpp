@@ -24,8 +24,52 @@ AxisFlowService& AxisFlowService::instance()
 
 void AxisFlowService::loadHotkeysFromSettings()
 {
+    // Layering, later wins: built-in (already in the map from the Hotkeys ctor)
+    // -> hotkeys.ini -> the user's own bindings. The file is the DEFAULTS layer,
+    // so editing it never overrides a key the user deliberately rebound.
+    if (!_hotkeyDefaultsPath.empty())
+        AxisFlowSettings::instance().loadHotkeyDefaultsFile(_hotkeyDefaultsPath, _hotkeys);
+
     AxisFlowSettings::instance().loadHotkeys(_hotkeys);
     _hotkeysLoaded = true;
+}
+
+void AxisFlowService::setHotkeys(AxisAction a, const std::vector<int>& keys, bool persist)
+{
+    if (a == AxisAction::None)
+        return;
+
+    // bind() drops the action's previous keys first, so this is a replace.
+    // Assigning a key that another action owns moves it: the map is key -> action.
+    _hotkeys.bind(a, keys);
+
+    if (persist)
+        AxisFlowSettings::instance().saveHotkeys(_hotkeys);
+    Q_EMIT stateChanged();
+}
+
+void AxisFlowService::resetHotkeys()
+{
+    AxisFlowSettings::instance().clearStoredHotkeys();
+
+    // Rebuild the live map from the defaults layer only.
+    _hotkeys.setDefaults();
+    if (!_hotkeyDefaultsPath.empty())
+        AxisFlowSettings::instance().loadHotkeyDefaultsFile(_hotkeyDefaultsPath, _hotkeys);
+
+    Q_EMIT stateChanged();
+}
+
+void AxisFlowService::applyHotkeyDefaultsFile(const std::string& path)
+{
+    _hotkeyDefaultsPath = path;
+
+    _hotkeys.setDefaults();   // start from the built-in layout, then re-layer
+    AxisFlowSettings::instance().loadHotkeyDefaultsFile(path, _hotkeys);
+    if (_hotkeysLoaded)       // user layer only once it has been pulled in
+        AxisFlowSettings::instance().loadHotkeys(_hotkeys);
+
+    Q_EMIT stateChanged();
 }
 
 void AxisFlowService::setHotkey(int qtKey, AxisAction a, bool persist)
@@ -81,6 +125,8 @@ void AxisFlowService::setConstrainEnabled(bool on)
 {
     if (_constrainEnabled == on) return;
     _constrainEnabled = on;
+    if (on)
+        _displayLock = AxisLock::None;   // the adapter mirror is display-only
     Q_EMIT stateChanged();
 }
 
@@ -118,14 +164,51 @@ void AxisFlowService::performAction(AxisAction a)
     case AxisAction::ToggleActive: toggleActive();           break;
     case AxisAction::ToggleMode: toggleMode();               break;
     case AxisAction::SmartLock:  smartLockToggle();          break;
-    // Lock keys toggle: pressing the bound key again releases the lock. This is
-    // what lets a keyboard-only user clear a lock without Escape (reserved for
-    // Draft in the adapter).
-    case AxisAction::LockX: (lock() == AxisLock::X) ? clearLocks() : lockAxis(AxisLock::X); break;
-    case AxisAction::LockY: (lock() == AxisLock::Y) ? clearLocks() : lockAxis(AxisLock::Y); break;
-    case AxisAction::LockZ: (lock() == AxisLock::Z) ? clearLocks() : lockAxis(AxisLock::Z); break;
-    // Escape is the single "let go" key: it releases the axis lock AND every
-    // typed override, so the fields start following the cursor again.
+    // Lock keys toggle a FIELD FREEZE: the field stops following the cursor,
+    // holding the value it showed at the keypress; pressing again releases it.
+    // LockX/LockY act only in rectangular mode (polar has no X/Y fields);
+    // LockD freezes the distance in polar; LockZ works in both modes -- with an
+    // object snap active it pins the snapped point's height in compass space.
+    case AxisAction::LockX:
+        if (mode() == CompassMode::Rectangular) toggleFieldLock(0);
+        break;
+    case AxisAction::LockY:
+        if (mode() == CompassMode::Rectangular) toggleFieldLock(1);
+        break;
+    case AxisAction::LockZ: toggleFieldLock(2); break;
+    case AxisAction::LockD:
+        if (mode() == CompassMode::Polar) toggleFieldLock(0);
+        break;
+    // View / origin actions. The rotations are plain setPlane() bases (the
+    // compass and the solver both follow stateChanged); RotateByView is served
+    // by the tool, which owns the camera.
+    case AxisAction::SetOrigin:    setOriginToCursor(); break;
+    case AxisAction::RotateTop:
+        setPlane(Base::Vector3d(1, 0, 0), Base::Vector3d(0, 1, 0), Base::Vector3d(0, 0, 1));
+        _rotateCycle = 1;                              // next in the cycle: Front
+        break;
+    case AxisAction::RotateFront:
+        // Compass Z -> global -Y, compass Y -> global +Z; u = v x n = +X.
+        setPlane(Base::Vector3d(1, 0, 0), Base::Vector3d(0, 0, 1), Base::Vector3d(0, -1, 0));
+        _rotateCycle = 2;                              // next: Side
+        break;
+    case AxisAction::RotateSide:
+        // Compass Z -> global +X, compass Y -> global +Z; u = v x n = +Y.
+        setPlane(Base::Vector3d(0, 1, 0), Base::Vector3d(0, 0, 1), Base::Vector3d(1, 0, 0));
+        _rotateCycle = 0;                              // next: Top
+        break;
+    case AxisAction::RotateByView:
+        Q_EMIT alignToViewRequested();
+        break;
+    case AxisAction::RotateCycle:
+        // Top -> Front -> Side -> Top...; each explicit Rotate* re-seeds the
+        // cycle so E always continues from what the user sees.
+        performAction(_rotateCycle == 0 ? AxisAction::RotateTop
+                    : _rotateCycle == 1 ? AxisAction::RotateFront
+                                        : AxisAction::RotateSide);
+        break;
+    // "Let go of everything": locks AND typed overrides, so all the fields
+    // start following the cursor again.
     case AxisAction::ClearLocks: clearLocks(); clearKeyValues(); break;
     // CancelEntry is normally intercepted by the panel (it owns entry state).
     // Reaching here means no panel context, so fall back to the second layer.
@@ -142,9 +225,17 @@ void AxisFlowService::performAction(AxisAction a)
 
 void AxisFlowService::confirm(const Base::Vector3d& worldPt)
 {
+    // "Compass follows direction": rotate BEFORE the origin moves, using the
+    // segment from the previous reference point to the point being confirmed.
+    // 1 = keep the normal (in-plane), 2 = full. Gated on _hasFollowRef so the
+    // first point of a fresh session never rotates off a stale origin.
+    const int follow = AxisFlowSettings::instance().compassFollowDirection();
+    if (follow != 0 && _hasFollowRef)
+        _solver.rotateToDirection(worldPt - _solver.getOrigin(), follow == 1);
+    _hasFollowRef = true;
+
     _solver.setOrigin(worldPt);
-    _solver.clearKeyValues();
-    _solver.setAxisLock(AxisLock::None);   // lock is per-point in AxisFlow
+    _solver.clearKeyValues();   // typed values AND locks are per-point in AxisFlow
     Q_EMIT pointConfirmed(worldPt);
     Q_EMIT stateChanged();
 }
@@ -153,9 +244,22 @@ void AxisFlowService::confirm(const Base::Vector3d& worldPt)
 // Setters
 // ---------------------------------------------------------------------------
 
+void AxisFlowService::setOriginToCursor()
+{
+    // The solved point, not the raw cursor: with a snap live, "O" re-anchors
+    // the compass exactly at the snapped vertex.
+    const Base::Vector3d p = _solver.getSolvedPoint();
+    _solver.setOrigin(p);
+    _solver.clearKeyValues();   // a new reference point, same as after confirm
+    _hasFollowRef = true;       // the next confirmed segment starts here
+    Q_EMIT stateChanged();
+    refreshCursor();
+}
+
 void AxisFlowService::setOrigin(const Base::Vector3d& o)
 {
     _solver.setOrigin(o);
+    _hasFollowRef = true;   // a seeded base point IS a valid segment start
     Q_EMIT stateChanged();
 }
 
@@ -186,24 +290,125 @@ void AxisFlowService::toggleMode()
                 : CompassMode::Rectangular);
 }
 
-void AxisFlowService::lockAxis(AxisLock a)
+void AxisFlowService::toggleFieldLock(int field)
 {
-    _solver.setAxisLock(a);
+    // The checkbox semantics: checked = the field is fixed (typed or locked).
+    // Toggling a fixed field therefore ALWAYS releases it, whichever way it was
+    // fixed; toggling a free field freezes it at the value it currently shows.
+    if (hasKeyValue(field)) {
+        clearKeyValue(field);   // emits + refreshes
+        return;
+    }
+    const bool rect = (_solver.getMode() == CompassMode::Rectangular);
+    switch (field) {
+    case 0: setSlotLock(rect ? LockSlot::X : LockSlot::Dist);  break;
+    case 1: setSlotLock(rect ? LockSlot::Y : LockSlot::Angle); break;
+    case 2: setSlotLock(LockSlot::Z);                          break;
+    default: break;
+    }
+}
+
+void AxisFlowService::setSlotLock(LockSlot slot)
+{
+    if (slotLocked(slot))
+        return;   // idempotent
+
+    // Capture what the user currently SEES: the solved point's component, with
+    // snap and indexing applied (indexing() carries the adjusted local offset).
+    const IndexingResult ix = _solver.indexing();
+    switch (slot) {
+    case LockSlot::X:     _solver.lockValueX(ix.lx); break;
+    case LockSlot::Y:     _solver.lockValueY(ix.ly); break;
+    case LockSlot::Z:     _solver.lockValueZ(ix.lz); break;
+    case LockSlot::Dist:  _solver.lockValueDist(std::sqrt(ix.lx*ix.lx + ix.ly*ix.ly)); break;
+    case LockSlot::Angle: _solver.lockValueAngle(std::atan2(ix.ly, ix.lx) * 180.0 / M_PI); break;
+    }
     Q_EMIT stateChanged();
+    refreshCursor();
+}
+
+void AxisFlowService::clearSlotLock(LockSlot slot)
+{
+    if (!slotLocked(slot))
+        return;
+    switch (slot) {
+    case LockSlot::X:     _solver.clearValueX();     break;
+    case LockSlot::Y:     _solver.clearValueY();     break;
+    case LockSlot::Z:     _solver.clearValueZ();     break;
+    case LockSlot::Dist:  _solver.clearValueDist();  break;
+    case LockSlot::Angle: _solver.clearValueAngle(); break;
+    }
+    Q_EMIT stateChanged();
+    refreshCursor();
+}
+
+bool AxisFlowService::slotLocked(LockSlot slot) const
+{
+    const unsigned m = _solver.lockMask();
+    switch (slot) {
+    case LockSlot::X:     return (m & LockBitX)     != 0;
+    case LockSlot::Y:     return (m & LockBitY)     != 0;
+    case LockSlot::Z:     return (m & LockBitZ)     != 0;
+    case LockSlot::Dist:  return (m & LockBitDist)  != 0;
+    case LockSlot::Angle: return (m & LockBitAngle) != 0;
+    }
+    return false;
 }
 
 void AxisFlowService::clearLocks()
 {
-    _solver.setAxisLock(AxisLock::None);
+    const unsigned m = _solver.lockMask();
+    if (m == 0 && _displayLock == AxisLock::None)
+        return;
+    if (m & LockBitX)     _solver.clearValueX();
+    if (m & LockBitY)     _solver.clearValueY();
+    if (m & LockBitZ)     _solver.clearValueZ();
+    if (m & LockBitDist)  _solver.clearValueDist();
+    if (m & LockBitAngle) _solver.clearValueAngle();
+    _displayLock = AxisLock::None;
     Q_EMIT stateChanged();
+    refreshCursor();
 }
 
 void AxisFlowService::smartLockToggle()
 {
-    if (_solver.getAxisLock() != AxisLock::None)
+    // Toggle off: any active lock releases them all.
+    if (_solver.anyLock()) {
         clearLocks();
-    else
-        lockAxis(_solver.nearestAxis());
+        return;
+    }
+
+    if (_solver.getMode() == CompassMode::Rectangular) {
+        // Constrain movement to the axis the cursor leans towards by freezing
+        // the OTHER two fields at 0 (the axis line through the origin).
+        if (_solver.nearestAxis() == AxisLock::X) {
+            _solver.lockValueY(0.0);
+            _solver.lockValueZ(0.0);
+        } else {
+            _solver.lockValueX(0.0);
+            _solver.lockValueZ(0.0);
+        }
+    } else {
+        // Polar: freeze the angle at the nearest axis direction (0/90/180/270)
+        // and Z at 0; the distance stays free along that ray.
+        double a = std::round(_solver.getAngleDeg() / 90.0) * 90.0;
+        if (a <= -180.0) a = 180.0;   // atan2 range is (-180, 180]
+        _solver.lockValueAngle(a);
+        _solver.lockValueZ(0.0);
+    }
+    Q_EMIT stateChanged();
+    refreshCursor();
+}
+
+void AxisFlowService::setDisplayLock(AxisLock a)
+{
+    // Meaningful only while Draft owns the constraint (adapter mode).
+    if (_constrainEnabled)
+        a = AxisLock::None;
+    if (_displayLock == a)
+        return;
+    _displayLock = a;
+    Q_EMIT stateChanged();
 }
 
 void AxisFlowService::setKeyValue(int field, double value)
@@ -361,5 +566,18 @@ void AxisFlowService::clearIndexedDistance()
     Q_EMIT stateChanged();
     refreshCursor();
 }
+
+void AxisFlowService::setSnapPoint(const Base::Vector3d& world)
+{
+    // Silent: pushed from the tool on every mouse move, right before
+    // updateCursor(), which does the emitting.
+    _solver.setSnapPoint(world);
+}
+
+void AxisFlowService::clearSnap()
+{
+    _solver.clearSnap();
+}
+
 
 } // namespace AxisFlowGui

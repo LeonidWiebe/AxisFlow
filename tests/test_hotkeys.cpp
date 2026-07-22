@@ -10,15 +10,23 @@ using namespace AxisFlowGui;
 
 TEST(Hotkeys, DefaultsMatchTheDocumentedLayout)
 {
-    Hotkeys h;   // ctor installs defaults
-    EXPECT_EQ(h.action(Qt::Key_Insert),    AxisAction::ToggleActive);
+    Hotkeys h;   // ctor installs defaults (mirrors hotkeys.ini)
+    EXPECT_EQ(h.action(Qt::Key_Insert),    AxisAction::None);           // unbound now
     EXPECT_EQ(h.action(Qt::Key_Space),     AxisAction::ToggleMode);
-    EXPECT_EQ(h.action(Qt::Key_Return),    AxisAction::ConfirmPoint);
-    EXPECT_EQ(h.action(Qt::Key_Enter),     AxisAction::ConfirmPoint);   // numpad
+    EXPECT_EQ(h.action(Qt::Key_P),         AxisAction::ConfirmPoint);
+    EXPECT_EQ(h.action(Qt::Key_Return),    AxisAction::SmartLock);
+    EXPECT_EQ(h.action(Qt::Key_Enter),     AxisAction::SmartLock);      // numpad
     EXPECT_EQ(h.action(Qt::Key_X),         AxisAction::LockX);
     EXPECT_EQ(h.action(Qt::Key_Y),         AxisAction::LockY);
     EXPECT_EQ(h.action(Qt::Key_Z),         AxisAction::LockZ);
-    EXPECT_EQ(h.action(Qt::Key_Escape),    AxisAction::FinishLine);     // new default
+    EXPECT_EQ(h.action(Qt::Key_D),         AxisAction::LockD);          // polar distance
+    EXPECT_EQ(h.action(Qt::Key_O),         AxisAction::SetOrigin);
+    EXPECT_EQ(h.action(Qt::Key_T),         AxisAction::RotateTop);
+    EXPECT_EQ(h.action(Qt::Key_F),         AxisAction::RotateFront);
+    EXPECT_EQ(h.action(Qt::Key_S),         AxisAction::RotateSide);
+    EXPECT_EQ(h.action(Qt::Key_V),         AxisAction::RotateByView);
+    EXPECT_EQ(h.action(Qt::Key_E),         AxisAction::RotateCycle);
+    EXPECT_EQ(h.action(Qt::Key_Escape),    AxisAction::FinishLine);
     EXPECT_EQ(h.action(Qt::Key_QuoteLeft), AxisAction::CancelCommand);  // backtick
 }
 
@@ -38,18 +46,18 @@ TEST(Hotkeys, SetNoneUnbinds)
     EXPECT_EQ(h.action(Qt::Key_X), AxisAction::None);
 }
 
-TEST(Hotkeys, ConfirmPointHasBothReturnAndEnterByDefault)
+TEST(Hotkeys, SmartLockHasBothReturnAndEnterByDefault)
 {
     Hotkeys h;
-    const std::vector<int> keys = h.keysFor(AxisAction::ConfirmPoint);
+    const std::vector<int> keys = h.keysFor(AxisAction::SmartLock);
     EXPECT_EQ(keys.size(), 2u);
 }
 
 TEST(Hotkeys, BindReplacesEveryPreviousKeyOfTheAction)
 {
     Hotkeys h;
-    h.bind(AxisAction::ConfirmPoint, {Qt::Key_F5});
-    const std::vector<int> keys = h.keysFor(AxisAction::ConfirmPoint);
+    h.bind(AxisAction::SmartLock, {Qt::Key_F5});
+    const std::vector<int> keys = h.keysFor(AxisAction::SmartLock);
     ASSERT_EQ(keys.size(), 1u);
     EXPECT_EQ(keys[0], static_cast<int>(Qt::Key_F5));
     // The old Return / Enter bindings are gone.

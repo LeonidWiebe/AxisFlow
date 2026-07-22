@@ -14,10 +14,22 @@ error -- the same limitation every FreeCAD GUI workbench has. Consequences:
 * the **Python API** is tested inside a GUI FreeCAD (`FreeCAD --run-test`);
 * the **compass/panel rendering and live input** stay on the manual checklist.
 
-## Tier 1 -- C++ unit tests (Solver + Hotkeys)
+## Tier 1 -- C++ unit tests (solver, indexing, hotkeys, entry policy)
 
 Pure logic, no Coin, no FreeCADGui, no display. Fast and deterministic. Uses
 GoogleTest (FreeCAD's own C++ test framework), fetched at configure time.
+
+Four suites live in `tests/`: `test_solver.cpp` (constraints, locks, working-plane
+maths), `test_indexing.cpp` (the live-line indexing policy, plus how object snaps
+and Smart lock interact with it), `test_hotkeys.cpp` (the key map) and
+`test_entry.cpp` (typed-value entry policy). `AxisFlowIndexing.h` is deliberately
+a header-only pure function, so the whole indexing policy is testable without any
+FreeCAD object graph -- keep it that way when extending it.
+
+One trap worth knowing: `IndexingInput` is filled field by field in the test
+helper `mk()`. When you add a field to that struct, add it to `mk()` too --
+otherwise the tests run on uninitialised memory and fail in ways that look like
+logic errors.
 
 Enable once by adding a single line at the end of the root `CMakeLists.txt`
 (after the `AxisFlow` target and the Qt6/Python3/FreeCAD paths):
@@ -36,10 +48,14 @@ ctest --test-dir build -C RelWithDebInfo --output-on-failure
 
 The runner links only `FreeCADBase.lib` (+ Python + Qt headers) -- the pixi
 env's Python/Qt DLLs must be on `PATH` at run time, as for the module itself.
-Covered: compass basis and world<->local transform, axis-lock projection,
-keyboard overrides, `nearestAxis`, polar distance/angle, and the full hotkey
-map (defaults, set/remove/bind, name round-trip). One `DISABLED_` test records
-the not-yet-implemented polar lock (roadmap item 9) -- enable it when it lands.
+Covered: compass basis and world<->local transform, field locks (a frozen slot
+holds its value while free ones follow the cursor; the SmartLock pair; polar
+distance/angle locks; the Z lock pinning a snapped point's height; the
+typed-vs-locked distinction that gates distance indexing; the candidate axis
+staying lit while a lock pins the point onto an axis), keyboard overrides,
+`nearestAxis`, polar distance/angle, and the full hotkey map (defaults incl.
+`LockD`, set/remove/bind, name round-trip). The former `DISABLED_` polar-lock
+placeholder is gone: the unified fixed-slot model made the polar tests live.
 
 ## Tier 2 -- Python API tests (GUI FreeCAD)
 
@@ -65,9 +81,10 @@ CMake `install(FILES ...)` list, or copy it) so FreeCAD's discovery finds it.
 ## Tier 3 -- manual checklist (interactive / rendering)
 
 Input flow, compass/panel visuals, teardown under real focus, working-plane
-pickup, Escape/backtick behaviour, live-line toggle, Local/World readout, and
-"the created line is not selected" are covered by the running manual checklist
-in the handoff notes. These need synthetic mouse/key events, a live scene graph
+pickup, Escape/backtick behaviour, live-line toggle, Local/World readout,
+object snapping against real geometry (markers, the snap palette, Smart lock,
+3-D coordinates in the fields) and "the created line is not selected" are
+covered by the running manual checklist in the handoff notes. These need synthetic mouse/key events, a live scene graph
 and a visible display; automating them (QTest key injection + a framebuffer)
 is possible later but is high-friction on Windows and low-ROI for now.
 

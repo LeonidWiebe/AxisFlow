@@ -33,9 +33,36 @@ void AxisFlowSolver::setRawPoint(const Base::Vector3d& pt)
     _rawPoint = pt;
 }
 
-void AxisFlowSolver::setAxisLock(AxisLock lock)
+void AxisFlowSolver::rotateToDirection(const Base::Vector3d& worldDir, bool keepNormal)
 {
-    _lock = lock;
+    constexpr double eps = 1e-9;
+    const Base::Vector3d n0 = getPlaneNormal();
+
+    Base::Vector3d d = worldDir;
+    if (keepNormal)
+        d = d - n0 * d.Dot(n0);        // in-plane rotation only: project first
+    if (d.Length() < eps)
+        return;                        // no usable direction (zero, or along n)
+    Base::Vector3d u1 = d;
+    u1.Normalize();
+
+    Base::Vector3d n1;
+    if (keepNormal) {
+        n1 = n0;
+    } else {
+        // Keep the normal as close to the old one as possible: project the old
+        // normal perpendicular to the new u. Degenerate only when the segment
+        // ran along the old normal -- then the old v (always perpendicular to
+        // n0, hence to u1) takes over as the new normal.
+        n1 = n0 - u1 * n0.Dot(u1);
+        if (n1.Length() < eps)
+            n1 = getPlaneV();
+        n1.Normalize();
+    }
+
+    Base::Vector3d v1 = n1.Cross(u1);  // v = n x u  (so that u x v = n)
+    v1.Normalize();
+    setPlane(u1, v1, n1);
 }
 
 void AxisFlowSolver::setMode(CompassMode mode)
@@ -78,11 +105,37 @@ void AxisFlowSolver::resetCompassRotation()
     _compass.setToUnity();
 }
 
-void AxisFlowSolver::setValueX(double v) { _kX = v; }
-void AxisFlowSolver::setValueY(double v) { _kY = v; }
-void AxisFlowSolver::setValueZ(double v) { _kZ = v; }
-void AxisFlowSolver::setValueDist(double v)  { _kDist  = v; }
-void AxisFlowSolver::setValueAngle(double v) { _kAngle = v; }
+// Typing into a slot makes (or keeps) it a TYPED entry: the lock bit drops so
+// the value suppresses distance indexing like any other manual entry.
+void AxisFlowSolver::setValueX(double v) { _kX = v; _lockMask &= ~LockBitX; }
+void AxisFlowSolver::setValueY(double v) { _kY = v; _lockMask &= ~LockBitY; }
+void AxisFlowSolver::setValueZ(double v) { _kZ = v; _lockMask &= ~LockBitZ; }
+void AxisFlowSolver::setValueDist(double v)  { _kDist  = v; _lockMask &= ~LockBitDist; }
+void AxisFlowSolver::setValueAngle(double v) { _kAngle = v; _lockMask &= ~LockBitAngle; }
+
+void AxisFlowSolver::lockValueX(double v) { _kX = v; _lockMask |= LockBitX; }
+void AxisFlowSolver::lockValueY(double v) { _kY = v; _lockMask |= LockBitY; }
+void AxisFlowSolver::lockValueZ(double v) { _kZ = v; _lockMask |= LockBitZ; }
+void AxisFlowSolver::lockValueDist(double v)  { _kDist  = v; _lockMask |= LockBitDist; }
+void AxisFlowSolver::lockValueAngle(double v) { _kAngle = v; _lockMask |= LockBitAngle; }
+
+bool AxisFlowSolver::typedEntryActive() const
+{
+    // A slot is a typed entry when it holds a value AND its lock bit is clear.
+    if (hasValueX()     && !(_lockMask & LockBitX))     return true;
+    if (hasValueY()     && !(_lockMask & LockBitY))     return true;
+    if (hasValueZ()     && !(_lockMask & LockBitZ))     return true;
+    if (hasValueDist()  && !(_lockMask & LockBitDist))  return true;
+    if (hasValueAngle() && !(_lockMask & LockBitAngle)) return true;
+    return false;
+}
+
+bool AxisFlowSolver::inPlaneLocked() const
+{
+    if (_mode == CompassMode::Rectangular)
+        return (_lockMask & (LockBitX | LockBitY)) != 0;
+    return (_lockMask & (LockBitDist | LockBitAngle)) != 0;
+}
 
 void AxisFlowSolver::clearKeyValues()
 {
@@ -108,10 +161,10 @@ Base::Vector3d AxisFlowSolver::getPlaneNormal() const
 
 // ---------------------------------------------------------------------------
 
-Base::Vector3d AxisFlowSolver::getLocalOffset() const
+Base::Vector3d AxisFlowSolver::localOf(const Base::Vector3d& world) const
 {
     // delta in world space
-    Base::Vector3d delta = _rawPoint - _origin;
+    Base::Vector3d delta = world - _origin;
 
     // transform into compass-local space (compass is orthonormal → transpose = inverse)
     double lx = _compass[0][0]*delta.x + _compass[1][0]*delta.y + _compass[2][0]*delta.z;
@@ -119,6 +172,15 @@ Base::Vector3d AxisFlowSolver::getLocalOffset() const
     double lz = _compass[0][2]*delta.x + _compass[1][2]*delta.y + _compass[2][2]*delta.z;
 
     return Base::Vector3d(lx, ly, lz);
+}
+
+Base::Vector3d AxisFlowSolver::getLocalOffset() const
+{
+    // While an object snap is live the snapped point IS the point being placed,
+    // so everything downstream (locks, typed values, the panel read-out) works
+    // on it. It may sit off the compass plane -- that is intended: the Z field
+    // then shows the real height of the snapped geometry.
+    return localOf(_snapActive ? _snap : _rawPoint);
 }
 
 double AxisFlowSolver::getDistance() const
@@ -146,18 +208,13 @@ Base::Vector3d AxisFlowSolver::solvedLocalBase() const
 
     if (_mode == CompassMode::Rectangular)
     {
-        // Apply keyboard overrides
+        // Apply fixed slots (typed values and locks share the same slots): a
+        // fixed component holds its value, the free ones follow the cursor.
+        // "Movement along X only" is therefore Y and Z fixed (SmartLock does
+        // exactly that), not a special axis-lock state.
         if (!std::isnan(_kX)) local.x = _kX;
         if (!std::isnan(_kY)) local.y = _kY;
         if (!std::isnan(_kZ)) local.z = _kZ;
-
-        // Apply axis lock — zero out the other components
-        switch (_lock) {
-        case AxisLock::X:  local.y = 0; local.z = 0; break;
-        case AxisLock::Y:  local.x = 0; local.z = 0; break;
-        case AxisLock::Z:  local.x = 0; local.y = 0; break;
-        default: break;
-        }
     }
     else // Polar
     {
@@ -176,18 +233,39 @@ Base::Vector3d AxisFlowSolver::solvedLocalBase() const
 IndexingResult AxisFlowSolver::indexing() const
 {
     const Base::Vector3d l = solvedLocalBase();
+    const Base::Vector3d c = localOf(_rawPoint);   // raw cursor, pre-snap
     IndexingInput in;
     in.lx = l.x;  in.ly = l.y;  in.lz = l.z;
+    in.cursorLx = c.x;  in.cursorLy = c.y;
     in.indexedDistance = _indexedDistance;
     in.tolerancePx     = _tolPx;
     in.worldPerPixel   = _worldPerPixel;
     in.useDistance     = _useDistIdx;
     in.useAxis         = _useAxisIdx;
     in.localFrame      = _localFrame;
-    in.axisLocked      = (_lock != AxisLock::None);
-    // "Entering a coordinate" == any keyboard override currently set.
-    in.entryActive     = hasValueX() || hasValueY() || hasValueZ()
-                       || hasValueDist() || hasValueAngle();
+    in.axisLocked      = inPlaneLocked();
+    // Locks that pin the point ONTO an axis light the candidate axis: SmartLock
+    // freezes at exactly 0, so the comparison is exact on purpose (a field
+    // frozen at a non-zero value rides a PARALLEL line, not the axis -- the
+    // highlight would lie there).
+    if (_mode == CompassMode::Rectangular) {
+        in.lockedOnAxisX = ((_lockMask & LockBitY) != 0) && (_kY == 0.0);
+        in.lockedOnAxisY = ((_lockMask & LockBitX) != 0) && (_kX == 0.0);
+    }
+    else if ((_lockMask & LockBitAngle) != 0) {
+        // Polar SmartLock: an angle locked at a multiple of 90 deg rides an
+        // axis too (0/180 -> X, 90/270 -> Y).
+        const double a = std::fabs(std::fmod(_kAngle, 360.0));
+        auto near90 = [](double v, double t) { return std::fabs(v - t) < 1e-9; };
+        if (near90(a, 0.0) || near90(a, 180.0) || near90(a, 360.0))
+            in.lockedOnAxisX = true;
+        else if (near90(a, 90.0) || near90(a, 270.0))
+            in.lockedOnAxisY = true;
+    }
+    // "Entering a coordinate" == a TYPED override (a lock-frozen slot must not
+    // suppress distance indexing -- see LockBit).
+    in.entryActive     = typedEntryActive();
+    in.snapActive      = _snapActive;
     return computeIndexing(in);
 }
 
@@ -209,6 +287,7 @@ void AxisFlowSolver::clearKeyboardValues()
 {
     _kX = _kY = _kZ = NaN;
     _kDist = _kAngle = NaN;
+    _lockMask = 0;
 }
 
 // --- override queries / per-field release --------------------------------
@@ -227,10 +306,10 @@ double AxisFlowSolver::getValueZ() const     { return _kZ; }
 double AxisFlowSolver::getValueDist() const  { return _kDist; }
 double AxisFlowSolver::getValueAngle() const { return _kAngle; }
 
-void AxisFlowSolver::clearValueX()     { _kX = NaN; }
-void AxisFlowSolver::clearValueY()     { _kY = NaN; }
-void AxisFlowSolver::clearValueZ()     { _kZ = NaN; }
-void AxisFlowSolver::clearValueDist()  { _kDist = NaN; }
-void AxisFlowSolver::clearValueAngle() { _kAngle = NaN; }
+void AxisFlowSolver::clearValueX()     { _kX = NaN; _lockMask &= ~LockBitX; }
+void AxisFlowSolver::clearValueY()     { _kY = NaN; _lockMask &= ~LockBitY; }
+void AxisFlowSolver::clearValueZ()     { _kZ = NaN; _lockMask &= ~LockBitZ; }
+void AxisFlowSolver::clearValueDist()  { _kDist = NaN; _lockMask &= ~LockBitDist; }
+void AxisFlowSolver::clearValueAngle() { _kAngle = NaN; _lockMask &= ~LockBitAngle; }
 
 } // namespace AxisFlowGui

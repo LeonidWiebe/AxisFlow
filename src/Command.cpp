@@ -37,8 +37,8 @@ CmdAxisFlowActivate::CmdAxisFlowActivate()
 {
     sAppModule   = "AxisFlow";
     sGroup       = "AxisFlow";
-    sMenuText    = "Activate AxisFlow";
-    sToolTipText = "Toggle the AxisFlow coordinate input compass";
+    sMenuText    = QT_TR_NOOP("Activate AxisFlow");
+    sToolTipText = QT_TR_NOOP("Toggle the AxisFlow coordinate input compass");
     sWhatsThis   = "AxisFlow_Activate";
     sStatusTip   = sToolTipText;
     sPixmap      = "AxisFlow_Activate";
@@ -89,8 +89,8 @@ CmdAxisFlowToggleLiveLine::CmdAxisFlowToggleLiveLine()
 {
     sAppModule   = "AxisFlow";
     sGroup       = "AxisFlow";
-    sMenuText    = "Toggle live line";
-    sToolTipText = "Show or hide the live guide line from the compass centre to the cursor";
+    sMenuText    = QT_TR_NOOP("Toggle live line");
+    sToolTipText = QT_TR_NOOP("Show or hide the live guide line from the compass centre to the cursor");
     sWhatsThis   = "AxisFlow_ToggleLiveLine";
     sStatusTip   = sToolTipText;
     sPixmap      = "AxisFlow_ToggleLiveLine";
@@ -127,9 +127,9 @@ CmdAxisFlowDrawLine::CmdAxisFlowDrawLine()
 {
     sAppModule   = "AxisFlow";
     sGroup       = "AxisFlow";
-    sMenuText    = "Draw line";
-    sToolTipText = "Draw a polyline using the AxisFlow compass (Escape starts a "
-                   "new line, backtick ends the command)";
+    sMenuText    = QT_TR_NOOP("Draw line");
+    sToolTipText = QT_TR_NOOP("Draw a polyline using the AxisFlow compass (Escape starts a "
+                             "new line, backtick ends the command)");
     sWhatsThis   = "AxisFlow_DrawLine";
     sStatusTip   = sToolTipText;
     sPixmap      = "AxisFlow_DrawLine";
@@ -165,8 +165,8 @@ CmdAxisFlowSettings::CmdAxisFlowSettings()
 {
     sAppModule   = "AxisFlow";
     sGroup       = "AxisFlow";
-    sMenuText    = "Settings";
-    sToolTipText = "Open the AxisFlow settings (changes apply live)";
+    sMenuText    = QT_TR_NOOP("Settings");
+    sToolTipText = QT_TR_NOOP("Open the AxisFlow settings (changes apply live)");
     sWhatsThis   = "AxisFlow_Settings";
     sStatusTip   = sToolTipText;
     sPixmap      = "AxisFlow_Settings";

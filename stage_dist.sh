@@ -43,11 +43,15 @@ install -m 0644 InitGui.py            "dist/${APPNAME}/"
 install -m 0644 axisflow_snap.py      "dist/${APPNAME}/"
 install -m 0644 axisflow_demo.py      "dist/${APPNAME}/"
 install -m 0644 axisflow_settings.py  "dist/${APPNAME}/"
+install -m 0644 axisflow_snapping.py  "dist/${APPNAME}/"
 install -m 0644 package.xml           "dist/${APPNAME}/"
+install -m 0644 hotkeys.ini           "dist/${APPNAME}/"
 [ -f README.md ]    && install -m 0644 README.md    "dist/${APPNAME}/"
-[ -f CHANGELOG.md ] && install -m 0644 CHANGELOG.md "dist/${APPNAME}/"
+[ -f man/CHANGELOG.md ] && install -m 0644 man/CHANGELOG.md "dist/${APPNAME}/"
 [ -f LICENSE ]      && install -m 0644 LICENSE      "dist/${APPNAME}/"
 cp -r Resources/. "dist/${APPNAME}/Resources/" 2>/dev/null || cp -r resources/. "dist/${APPNAME}/Resources/"
+mkdir -p "dist/${APPNAME}/translations"
+cp translations/*.qm "dist/${APPNAME}/translations/" 2>/dev/null || true
 
 echo "=== Tar -> ${ASSET} ==="
 rm -f "$ASSET" SHA256SUMS.txt

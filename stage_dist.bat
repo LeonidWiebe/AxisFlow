@@ -34,11 +34,17 @@ copy /y InitGui.py           dist\AxisFlow\ >nul || exit /b 1
 copy /y axisflow_snap.py     dist\AxisFlow\ >nul || exit /b 1
 copy /y axisflow_demo.py     dist\AxisFlow\ >nul || exit /b 1
 copy /y axisflow_settings.py dist\AxisFlow\ >nul || exit /b 1
+copy /y axisflow_snapping.py dist\AxisFlow\ >nul || exit /b 1
 copy /y package.xml          dist\AxisFlow\ >nul || exit /b 1
+copy /y hotkeys.ini          dist\AxisFlow\ >nul || exit /b 1
 if exist README.md    copy /y README.md    dist\AxisFlow\ >nul
-if exist CHANGELOG.md copy /y CHANGELOG.md dist\AxisFlow\ >nul
+if exist man\CHANGELOG.md copy /y man\CHANGELOG.md dist\AxisFlow\ >nul
 if exist LICENSE      copy /y LICENSE      dist\AxisFlow\ >nul
 xcopy /e /i /y Resources dist\AxisFlow\Resources >nul || exit /b 1
+if exist translations (
+    mkdir dist\AxisFlow\translations >nul 2>nul
+    copy /y translations\*.qm dist\AxisFlow\translations\ >nul 2>nul
+)
 
 echo === Staged: dist\AxisFlow ===
 exit /b 0

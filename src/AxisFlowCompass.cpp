@@ -22,6 +22,7 @@
 #include <Inventor/system/gl.h>
 #include <Inventor/SbMatrix.h>
 #include <Inventor/SbRotation.h>
+#include <Inventor/sensors/SoTimerSensor.h>
 
 #include <algorithm>
 #include <cmath>
@@ -255,6 +256,8 @@ void AxisFlowCompass::applySettings()
 {
     const AxisFlowSettings& s = AxisFlowSettings::instance();
 
+    _animDurationS = static_cast<float>(s.compassRotateAnimation());
+
     const float t = static_cast<float>(s.axisThicknessPx());
     _styleX->lineWidth.setValue(t);
     _styleY->lineWidth.setValue(t);
@@ -431,20 +434,94 @@ void AxisFlowCompass::setOrigin(const SbVec3f& pt)
     rebuildGuide();
 }
 
+AxisFlowCompass::~AxisFlowCompass()
+{
+    if (_animSensor) {
+        _animSensor->unschedule();
+        delete _animSensor;
+        _animSensor = nullptr;
+    }
+}
+
 void AxisFlowCompass::setPlane(const SbVec3f& u, const SbVec3f& v, const SbVec3f& n)
 {
-    _u = u; _v = v; _n = n;
-
-    // Columns of the rotation matrix are the plane axes: local X -> u, Y -> v,
-    // Z -> n. SbMatrix is row-major, hence the transposed-looking assignment.
+    // Rows of the rotation matrix are the plane axes (Coin's row-vector
+    // convention): local X -> u, Y -> v, Z -> n.
     SbMatrix m;
     m.makeIdentity();
     m[0][0] = u[0]; m[0][1] = u[1]; m[0][2] = u[2];
     m[1][0] = v[0]; m[1][1] = v[1]; m[1][2] = v[2];
     m[2][0] = n[0]; m[2][1] = n[1]; m[2][2] = n[2];
+    const SbRotation target(m);
 
-    _transform->rotation.setValue(SbRotation(m));
+    _animTgtU = u; _animTgtV = v; _animTgtN = n;
+
+    // Snap when: animation disabled, first orientation ever (activation must
+    // not sweep in from identity), or the change is negligible.
+    const SbRotation current = _transform->rotation.getValue();
+    SbVec3f probe(1, 0, 0), probeTgt(1, 0, 0);
+    current.multVec(probe, probe);
+    target.multVec(probeTgt, probeTgt);
+    const bool negligible = (probe - probeTgt).length() < 1e-6f
+                         && std::fabs(_n.dot(n) - 1.0f) < 1e-6f;
+    if (_animDurationS <= 0.0f || !_hasOrientation || negligible) {
+        if (_animSensor) _animSensor->unschedule();
+        _hasOrientation = true;
+        applyRotationNow(target);
+        _u = u; _v = v; _n = n;   // exact basis, no numeric drift
+        rebuildGuide();
+        return;
+    }
+
+    // Retargeting mid-flight starts from the CURRENT interpolated pose, so a
+    // quick T-F-S sequence chains smoothly instead of jumping.
+    _animFrom = current;
+    _animTo   = target;
+    _animT0   = SbTime::getTimeOfDay();
+    if (!_animSensor) {
+        _animSensor = new SoTimerSensor(&AxisFlowCompass::animTickCB, this);
+        _animSensor->setInterval(SbTime(1.0 / 60.0));
+    }
+    if (!_animSensor->isScheduled())
+        _animSensor->schedule();
+}
+
+void AxisFlowCompass::animTickCB(void* data, SoSensor*)
+{
+    static_cast<AxisFlowCompass*>(data)->animTick();
+}
+
+void AxisFlowCompass::animTick()
+{
+    const double t = (SbTime::getTimeOfDay() - _animT0).getValue()
+                   / double(_animDurationS);
+    if (t >= 1.0) {
+        finishAnimation();
+        return;
+    }
+    const float e = float(t * t * (3.0 - 2.0 * t));   // smoothstep ease in/out
+    applyRotationNow(SbRotation::slerp(_animFrom, _animTo, e));
     rebuildGuide();
+}
+
+void AxisFlowCompass::finishAnimation()
+{
+    if (_animSensor)
+        _animSensor->unschedule();
+    applyRotationNow(_animTo);
+    _u = _animTgtU; _v = _animTgtV; _n = _animTgtN;   // land exactly
+    rebuildGuide();
+}
+
+void AxisFlowCompass::applyRotationNow(const SbRotation& r)
+{
+    _transform->rotation.setValue(r);
+    // Keep the guide-line math in lockstep with what is on screen: derive the
+    // display basis from the very same rotation (rows = axis images).
+    SbVec3f u(1, 0, 0), v(0, 1, 0), n(0, 0, 1);
+    r.multVec(u, _u);
+    r.multVec(v, _v);
+    r.multVec(n, _n);
 }
 
 void AxisFlowCompass::setCursorPoint(const SbVec3f& pt)

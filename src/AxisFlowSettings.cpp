@@ -4,6 +4,12 @@
 #include "AxisFlowHotkeys.h"
 
 #include <App/Application.h>
+#include <Base/Console.h>
+
+#include <QtCore/QFile>
+#include <QtCore/QStringList>
+#include <QtCore/QTextStream>
+#include <QtGui/QKeySequence>
 
 #include <algorithm>
 #include <string>
@@ -35,11 +41,66 @@ constexpr double kDefLiveLineTransp = 0.50;
 constexpr int    kDefIdxAxisWeight  = 8;      // pixels
 constexpr double kDefIdxAxisTransp  = 0.50;
 
+constexpr bool   kDefUseSnapping = true;
+constexpr bool   kDefSmartNegative = true;
+constexpr bool   kDefFocusAdvance = true;
+constexpr int    kDefCompassFollow = 0;
+
+static int clampFollow(int v) { return v < 0 ? 0 : (v > 2 ? 2 : v); }
+constexpr double kDefRotateAnim = 0.5;
+static double clampAnim(double v) { return v < 0.0 ? 0.0 : (v > 2.0 ? 2.0 : v); }
+
 int clampTol(int v)
 {
     if (v < 0)  v = 0;
     if (v > 50) v = 50;
     return v;
+}
+
+/**
+ * One key token from hotkeys.ini -> Qt key code, or 0 if not understood.
+ * Accepts a Qt key name ("Insert", "Space", "F5"), a literal character ("X",
+ * "`") or a raw code ("0x1000005", "16777221").
+ *
+ * A bare decimal is treated as a raw code only when it is clearly one (> 0xFF):
+ * that keeps "1" meaning the digit-1 key rather than key code 1.
+ */
+int parseKeyToken(const QString& tokIn)
+{
+    const QString tok = tokIn.trimmed();
+    if (tok.isEmpty())
+        return 0;
+
+    bool ok = false;
+    if (tok.startsWith(QLatin1String("0x"), Qt::CaseInsensitive)) {
+        const int code = tok.mid(2).toInt(&ok, 16);
+        if (ok && code != 0)
+            return code;
+    }
+    else {
+        const int code = tok.toInt(&ok, 10);
+        if (ok && code > 0xFF)          // special keys only; digits fall through
+            return code;
+    }
+
+    const QKeySequence seq = QKeySequence::fromString(tok, QKeySequence::PortableText);
+    if (seq.count() == 1) {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
+        const int combined = seq[0].toCombined();
+#else
+        const int combined = static_cast<int>(seq[0]);
+#endif
+        // AxisFlow binds plain keys only -- drop any modifier bits. A plain int
+        // mask on purpose: ~Qt::KeyboardModifierMask yields a QFlags in Qt6,
+        // and "int & QFlags" does not compile.
+        const int kModifierMask = 0xfe000000;
+        const int key = combined & ~kModifierMask;
+        // fromString() does NOT fail on nonsense: it yields Qt::Key_unknown.
+        // Reject it, so a typo is reported instead of binding a dead key.
+        if (key != static_cast<int>(Qt::Key_unknown))
+            return key;
+    }
+    return 0;
 }
 
 double clamp01(double v)
@@ -94,6 +155,12 @@ void AxisFlowSettings::load()
     _indexingAxisTransparency = clamp01(g->GetFloat("IndexingAxisTransparency", kDefIdxAxisTransp));
     if (_indexingAxisWeight < 1) _indexingAxisWeight = kDefIdxAxisWeight;
 
+    _useSnapping = g->GetBool("UseSnapping", kDefUseSnapping);
+    _smartNegative = g->GetBool("SmartNegativeDirection", kDefSmartNegative);
+    _focusAdvance = g->GetBool("FocusAdvanceOnMove", kDefFocusAdvance);
+    _compassFollow = clampFollow(static_cast<int>(g->GetInt("CompassFollowDirection", kDefCompassFollow)));
+    _rotateAnimS = clampAnim(g->GetFloat("CompassRotateAnimation", kDefRotateAnim));
+
     // Guard against a nonsensical stored size; a zero-size compass is invisible
     // and looks like a bug rather than a setting.
     if (_compassSizePx   < 8) _compassSizePx   = kDefCompassSize;
@@ -125,6 +192,11 @@ void AxisFlowSettings::save()
     g->SetFloat("LiveLineTransparency", _liveLineTransparency);
     g->SetInt("IndexingAxisWeight", _indexingAxisWeight);
     g->SetFloat("IndexingAxisTransparency", _indexingAxisTransparency);
+    g->SetBool("UseSnapping", _useSnapping);
+    g->SetBool("SmartNegativeDirection", _smartNegative);
+    g->SetBool("FocusAdvanceOnMove", _focusAdvance);
+    g->SetInt("CompassFollowDirection", _compassFollow);
+    g->SetFloat("CompassRotateAnimation", _rotateAnimS);
 }
 
 void AxisFlowSettings::resetDefaults()
@@ -147,6 +219,11 @@ void AxisFlowSettings::resetDefaults()
     _liveLineTransparency = kDefLiveLineTransp;
     _indexingAxisWeight  = kDefIdxAxisWeight;
     _indexingAxisTransparency = kDefIdxAxisTransp;
+    _useSnapping = kDefUseSnapping;
+    _smartNegative = kDefSmartNegative;
+    _focusAdvance = kDefFocusAdvance;
+    _compassFollow = kDefCompassFollow;
+    _rotateAnimS = kDefRotateAnim;
     save();
 
     // Hotkeys: drop the stored overrides so the built-in layout applies again.
@@ -328,6 +405,80 @@ void AxisFlowSettings::unpackColor(unsigned long rgba, float& r, float& g, float
 // Hotkeys
 // ---------------------------------------------------------------------------
 
+bool AxisFlowSettings::loadHotkeyDefaultsFile(const std::string& path, Hotkeys& hk)
+{
+    QFile f(QString::fromUtf8(path.c_str()));
+    if (!f.exists())
+        return false;                     // no file: the built-in layout stands
+    if (!f.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        Base::Console().warning("AxisFlow: cannot read %s, using built-in hotkeys.\n",
+                                path.c_str());
+        return false;
+    }
+
+    QTextStream in(&f);
+    int lineNo = 0;
+    while (!in.atEnd()) {
+        const QString raw = in.readLine();
+        ++lineNo;
+
+        const QString t = raw.trimmed();
+        if (t.isEmpty()
+            || t.startsWith(QLatin1Char(';'))
+            || t.startsWith(QLatin1Char('#'))
+            || t.startsWith(QLatin1Char('[')))     // comment, blank or [section]
+            continue;
+
+        const int eq = static_cast<int>(t.indexOf(QLatin1Char('=')));   // qsizetype -> int: an ini line never exceeds INT_MAX
+        if (eq < 0) {
+            Base::Console().warning("AxisFlow hotkeys.ini line %d: expected 'Action = Key'.\n",
+                                    lineNo);
+            continue;
+        }
+
+        const QString actName = t.left(eq).trimmed();
+        QString value         = t.mid(eq + 1).trimmed();
+
+        const AxisAction act = Hotkeys::fromName(actName.toStdString());
+        if (act == AxisAction::None) {
+            Base::Console().warning("AxisFlow hotkeys.ini line %d: unknown action '%s'.\n",
+                                    lineNo, actName.toUtf8().constData());
+            continue;
+        }
+
+        // A value of exactly one character IS that key, so ';' '#' ',' and '`'
+        // can be bound without being eaten as a comment marker or separator.
+        QStringList tokens;
+        if (value.size() == 1) {
+            tokens << value;
+        }
+        else {
+            for (int i = 0; i < value.size(); ++i) {
+                const QChar c = value.at(i);
+                if (c == QLatin1Char(';') || c == QLatin1Char('#')) {
+                    value = value.left(i).trimmed();   // strip inline comment
+                    break;
+                }
+            }
+            tokens = value.split(QLatin1Char(','), Qt::SkipEmptyParts);
+        }
+
+        std::vector<int> keys;
+        for (const QString& tok : tokens) {
+            const int code = parseKeyToken(tok);
+            if (code != 0)
+                keys.push_back(code);
+            else
+                Base::Console().warning("AxisFlow hotkeys.ini line %d: unknown key '%s'.\n",
+                                        lineNo, tok.trimmed().toUtf8().constData());
+        }
+
+        hk.bind(act, keys);   // empty list = explicitly unbound
+    }
+
+    return true;
+}
+
 void AxisFlowSettings::loadHotkeys(Hotkeys& hk)
 {
     ParameterGrp::handle g = group();
@@ -372,6 +523,57 @@ void AxisFlowSettings::saveHotkeys(const Hotkeys& hk)
         }
         g->SetASCII(key.c_str(), val.c_str());   // "" = unbound
     }
+}
+
+void AxisFlowSettings::setUseSnapping(bool v)
+{
+    if (v == _useSnapping) return;
+    _useSnapping = v;
+    group()->SetBool("UseSnapping", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setSmartNegativeDirection(bool v)
+{
+    if (v == _smartNegative) return;
+    _smartNegative = v;
+    group()->SetBool("SmartNegativeDirection", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setFocusAdvanceOnMove(bool v)
+{
+    if (v == _focusAdvance) return;
+    _focusAdvance = v;
+    group()->SetBool("FocusAdvanceOnMove", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setCompassFollowDirection(int v)
+{
+    v = clampFollow(v);
+    if (v == _compassFollow) return;
+    _compassFollow = v;
+    group()->SetInt("CompassFollowDirection", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setCompassRotateAnimation(double v)
+{
+    v = clampAnim(v);
+    if (v == _rotateAnimS) return;
+    _rotateAnimS = v;
+    group()->SetFloat("CompassRotateAnimation", v);
+    Q_EMIT changed();
+}
+
+
+void AxisFlowSettings::clearStoredHotkeys()
+{
+    ParameterGrp::handle g = group();
+    for (AxisAction a : Hotkeys::allActions())
+        g->RemoveASCII((std::string("Hotkey.") + Hotkeys::name(a)).c_str());
+    Q_EMIT changed();
 }
 
 } // namespace AxisFlowGui

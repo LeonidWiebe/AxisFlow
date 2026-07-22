@@ -93,6 +93,12 @@ public:
      * parameter tree only exists once App is up.
      */
     void loadHotkeysFromSettings();
+
+    /** Point the service at a hotkeys.ini and re-apply the whole layer stack:
+     *  built-in defaults -> that file -> the user's own bindings. Called from
+     *  InitGui.py at start-up (it knows the Mod folder); safe to call again to
+     *  pick up edits without restarting. */
+    void applyHotkeyDefaultsFile(const std::string& path);
     /**
      * Bind a key to an action. @p persist writes the whole map to the settings;
      * pass false for temporary, session-scoped rebinds (the Draft adapter
@@ -100,6 +106,15 @@ public:
      * user's stored layout).
      */
     void setHotkey(int qtKey, AxisAction a, bool persist = true);
+
+    /** Bind an action to a whole list of keys at once (replacing its previous
+     *  ones). Needed by the settings UI: an action may legitimately own several
+     *  keys, e.g. ConfirmPoint on both Return and the numpad Enter. */
+    void setHotkeys(AxisAction a, const std::vector<int>& keys, bool persist = true);
+
+    /** Forget the user's key overrides and fall back to the defaults layer
+     *  (built-in plus hotkeys.ini). Other settings are untouched. */
+    void resetHotkeys();
     /** Execute a semantic action (used by both the panel and the Coin handler). */
     void           performAction(AxisAction a);
 
@@ -108,6 +123,18 @@ public:
      * lock (an AxisFlow lock is per-point). Emits pointConfirmed + stateChanged.
      */
     void confirm(const Base::Vector3d& worldPt);
+    /** "Compass follows direction" uses the segment from the previous
+     *  reference point (the last confirmed point, or a seeded base point) to
+     *  the newly confirmed one. A fresh session has no such segment yet --
+     *  the tool calls this so the FIRST confirm never rotates the compass off
+     *  a stale origin from the previous session. */
+    void clearFollowReference()          { _hasFollowRef = false; }
+
+    /** SetOrigin (the "O" key): re-anchor the compass at the CURRENT solved
+     *  point (snap included) WITHOUT confirming a point -- no pointConfirmed,
+     *  so the running draw command ignores it. Typed values and locks are
+     *  cleared, like at any new reference point. */
+    void setOriginToCursor();
 
     // ---------------------------------------------------------------------
     // State setters (forwarded to the solver, each emits stateChanged)
@@ -125,15 +152,50 @@ public:
     void setMode(CompassMode m);
     void toggleMode();
 
-    void lockAxis(AxisLock a);
+    /**
+     * Field locks. A lock FREEZES a coordinate field at a value (the panel
+     * checkbox is its visual): the frozen component stops following the cursor,
+     * the free ones keep moving. This replaces the old single-axis lock, whose
+     * semantics were inverted ("movement along X" instead of "X frozen").
+     * The frozen value lives in the same slot as a typed override; LockBit in
+     * the solver records that it came from a lock.
+     */
+    enum class LockSlot { X, Y, Z, Dist, Angle };
+
+    /** Toggle the lock of a PANEL FIELD (mode-mapped like setKeyValue:
+     *  rect 0=X 1=Y 2=Z; polar 0=Dist 1=Angle 2=Z). A free field is frozen at
+     *  the value it currently shows (the solved point's component, snap and
+     *  indexing included); a fixed field (typed OR locked) is released. */
+    void toggleFieldLock(int field);
+
+    /** Freeze a slot at its current solved value (idempotent). */
+    void setSlotLock(LockSlot slot);
+    /** Release one slot's lock (and its value). */
+    void clearSlotLock(LockSlot slot);
+    bool slotLocked(LockSlot slot) const;
+
+    /** Release every LOCK-flavoured slot. Typed overrides survive (the
+     *  ClearLocks action clears those too, via clearKeyValues). */
     void clearLocks();
 
     /**
-     * MicroStation-style smart lock (bound to Enter):
-     *   - if no axis is locked, lock the one nearest the cursor direction;
-     *   - if an axis is locked, clear the lock.
+     * MicroStation-style smart lock: constrain the cursor to the axis it is
+     * leaning towards by freezing the OTHER two fields:
+     *   rect : cursor along X -> lock Y=0 and Z=0; along Y -> lock X=0 and Z=0;
+     *   polar: lock Angle to the nearest multiple of 90 deg and Z=0 (the
+     *          distance stays free along that ray).
+     * If any lock is active, the press releases all locks instead (toggle).
      */
     void smartLockToggle();
+
+    /**
+     * Adapter-only: mirror Draft's own axis restriction (Snapper.mask) for
+     * display. Draft's lock means "movement ALONG that axis"; the panel shows
+     * it as checkboxes on the two frozen fields. Ignored (reset) while
+     * constrainEnabled is true -- standalone locks are real field locks.
+     */
+    void setDisplayLock(AxisLock a);
+    AxisLock displayLock() const { return _displayLock; }
 
     /** Axis nearest the current cursor direction (X or Y). */
     AxisLock nearestAxis() const { return _solver.nearestAxis(); }
@@ -172,6 +234,8 @@ public:
      *  pushed on every mouse move, so it must NOT re-emit (that would recurse
      *  through the tool's syncCompassSize). */
     void setViewScale(double worldPerPixel);
+    /** Current camera scale (world units per screen pixel; 0 = no camera). */
+    double viewScale() const             { return _solver.viewScale(); }
 
     /** The panel's Local/World frame. Indexing runs only in the local frame. */
     void setLocalFrame(bool local);
@@ -186,10 +250,23 @@ public:
     IndexingResult currentIndexing() const { return _solver.indexing(); }
 
     // ---------------------------------------------------------------------
+    // Object snapping (Draft Snapper)
+    // ---------------------------------------------------------------------
+    /** Feed a live object snap. While set, the snapped point replaces the
+     *  cursor as the point being placed (locks, typed values and the read-out
+     *  all act on it), and soft indexing yields to it. */
+    void setSnapPoint(const Base::Vector3d& world);
+    void clearSnap();
+    bool snapActive() const              { return _solver.snapActive(); }
+    Base::Vector3d snapPoint() const     { return _solver.snapPoint(); }
+
+
+    // ---------------------------------------------------------------------
     // State getters
     // ---------------------------------------------------------------------
     CompassMode    mode()        const { return _solver.getMode(); }
-    AxisLock       lock()        const { return _solver.getAxisLock(); }
+    /** Bitmask of lock-flavoured slots (LockBit; 0 = no locks). */
+    unsigned       lockMask()    const { return _solver.lockMask(); }
     Base::Vector3d origin()      const { return _solver.getOrigin(); }
     Base::Vector3d localOffset() const { return _solver.getLocalOffset(); }
     double         distance()    const { return _solver.getDistance(); }
@@ -216,6 +293,8 @@ Q_SIGNALS:
     void finishRequested();
     /** Enter/ConfirmPoint: the tool should place the current solved point. */
     void confirmRequested();
+    /** RotateByView needs the camera; the view-owning tool serves it. */
+    void alignToViewRequested();
     /** The cursor moved; carries the solved (constrained) world point. */
     void cursorMoved(Base::Vector3d solvedWorld);
 
@@ -229,7 +308,11 @@ private:
     Hotkeys        _hotkeys;
     bool           _active { false };
     bool           _constrainEnabled { true };   // off in the Draft adapter
+    AxisLock       _displayLock { AxisLock::None };  // adapter-only mirror
+    bool           _hasFollowRef { false };          // a previous point exists
+    int            _rotateCycle { 0 };               // RotateCycle position
     bool           _hotkeysLoaded { false };     // settings pulled in yet?
+    std::string    _hotkeyDefaultsPath;          // hotkeys.ini, empty = none
 };
 
 } // namespace AxisFlowGui

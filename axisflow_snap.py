@@ -62,13 +62,15 @@ _MASK_TO_AXIS = {"x": "x", "y": "y", "z": "z"}
 
 
 def _mirror_draft_lock():
-    """Reflect Draft's own axis lock (Snapper.mask, set by its RestrictX/Y/Z
-    shortcuts) into AxisFlow, so the compass and the panel checkboxes show it.
-    Display only: constraining stays Draft's job (setConstrainEnabled(False))."""
+    """Reflect Draft's own axis restriction (Snapper.mask, set by its
+    RestrictX/Y/Z shortcuts) in the AxisFlow panel. Display only: constraining
+    stays Draft's job (setConstrainEnabled(False)), so this must NOT create a
+    real field lock -- setDisplayLock is the dedicated display-only channel
+    (the panel shows Draft's "move along X" as checks on the frozen Y and Z)."""
     try:
         import AxisFlow as AD
         mask = getattr(Gui.Snapper, "mask", None)
-        AD.lockAxis(_MASK_TO_AXIS.get(mask, "none"))
+        AD.setDisplayLock(_MASK_TO_AXIS.get(mask, "none"))
     except Exception:
         pass
 
@@ -239,6 +241,7 @@ def install():
         # constraining off so the point is not locked twice, and start clean.
         AD.setConstrainEnabled(False)
         AD.clearLocks()
+        AD.setDisplayLock("none")
 
         has_ui = AD.beginSession()   # activates service, shows compass + panel
         if not has_ui:
@@ -252,9 +255,13 @@ def install():
         # RestrictX/Y/Z (typed into the coordinate field), Enter commits the
         # point, Escape aborts. persist=False keeps this session-scoped so the
         # user's stored layout survives.
-        # Qt codes: X=0x58 Y=0x59 Z=0x5A, Return=0x1000004, Enter=0x1000005,
-        # Escape=0x1000000.
-        for code in (0x58, 0x59, 0x5A, 0x1000004, 0x1000005, 0x1000000):
+        # Qt codes: X=0x58 Y=0x59 Z=0x5A D=0x44 P=0x50 O=0x4F T=0x54 F=0x46
+        # S=0x53 V=0x56 E=0x45, Return=0x1000004, Enter=0x1000005,
+        # Escape=0x1000000. Every letter AxisFlow claims by default is unbound
+        # here: while a Draft command owns the input its own single-letter
+        # shortcuts (constraints, snaps, fill...) must keep working.
+        for code in (0x58, 0x59, 0x5A, 0x44, 0x50, 0x4F, 0x54, 0x46,
+                     0x53, 0x56, 0x45, 0x1000004, 0x1000005, 0x1000000):
             AD.setHotkey(code, "none", False)
     except Exception as e:
         _log("beginSession failed: {0}".format(e))

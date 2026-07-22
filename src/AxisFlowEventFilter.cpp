@@ -128,8 +128,21 @@ bool AxisFlowEventFilter::eventFilter(QObject* watched, QEvent* ev)
     if (t != QEvent::KeyPress && t != QEvent::ShortcutOverride)
         return QObject::eventFilter(watched, ev);
 
-    if (!AxisFlowService::instance().isActive())
+    if (!AxisFlowService::instance().isActive()) {
+        // While OFF the filter stays out of the way -- except for the one key
+        // whose whole job is to turn AxisFlow back ON. Without this the toggle
+        // was a one-way switch: the key deactivated, then never came back.
+        auto* ke = static_cast<QKeyEvent*>(ev);
+        if ((ke->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0
+            && AxisFlowService::instance().actionForKey(ke->key()) == AxisAction::ToggleActive
+            && inScope()) {
+            if (t == QEvent::ShortcutOverride) { ev->accept(); return true; }
+            if (!ke->isAutoRepeat())
+                AxisFlowService::instance().performAction(AxisAction::ToggleActive);
+            return true;
+        }
         return QObject::eventFilter(watched, ev);
+    }
 
     if (!inScope())
         return QObject::eventFilter(watched, ev);

@@ -99,12 +99,28 @@
 ## 5. Архитектура кода
 
 - **AxisFlowSolver** (`src/AxisFlowSolver.*`) — чистая математика. Ни Qt, ни Coin. Режим,
-  плоскость (u/v/n), origin, лок оси, keyboard-оверрайды; solved-точка, local offset,
+  плоскость (u/v/n), origin, keyboard-оверрайды; solved-точка, local offset,
   distance/angle, `nearestAxis()`. Матрица компаса: столбцы = оси, world→local = транспонирование.
-  Лок = зануление off-axis компонент (перпендикулярная проекция на линию).
+  **Модель локов (переработана):** поле либо свободно (следует за курсором), либо зафиксировано
+  (держит значение). Фиксация — один механизм со слотами оверрайдов (`_kX/_kY/_kZ/_kDist/_kAngle`,
+  NaN-сентинелы); битовая маска `LockBit`/`lockMask()` помечает лок-происхождение слота
+  (галка/клавиша/SmartLock) в отличие от набранного значения. `lockValue*` фиксирует со взводом
+  бита, `setValue*` (набор) бит снимает. Различие нужно индексированию: набранное значение гасит
+  точку-кандидата (`typedEntryActive`), лок — нет; ось-кандидат гасится при `inPlaneLocked`
+  (rect: X|Y; polar: D|A). «Движение только вдоль оси» = композиция двух локов (SmartLock).
+  Полярная ветка применяет `_kDist/_kAngle` — полярный лок закрыт этой же унификацией.
 - **AxisFlowService** (`src/AxisFlowService.*`) — singleton-`QObject`, мозг. Владеет солвером и
   состоянием. Сигналы `stateChanged`, `activeChanged(bool)`, `pointConfirmed`, `cursorMoved`.
-  Карта клавиш + `performAction`. `setConstrainEnabled(bool)` — выключается **только** в
+  Карта клавиш + `performAction`. Локи: `toggleFieldLock(field)` (mode-mapped 0/1/2, как
+  `setKeyValue`; свободное поле замораживается на ПОКАЗАННОМ значении — компонента solved-точки
+  из `indexing()`, со снапом/индексацией; фиксированное — освобождается), `setSlotLock/clearSlotLock/
+  slotLocked(LockSlot{X,Y,Z,Dist,Angle})`, `clearLocks()` (снимает только лок-слоты, набранные
+  значения живут; действие ClearLocks чистит и их через `clearKeyValues`). `smartLockToggle()`:
+  rect — по `nearestAxis` фиксирует ДВА других поля в 0 (X→лок Y=0,Z=0; Y→лок X=0,Z=0); polar —
+  лок угла на ближайшие 0/90/180/270° + Z=0, дистанция свободна; повторное нажатие снимает все
+  локи. Действия: LockX/LockY только в rect, LockD только в polar (поле D), LockZ — в обоих.
+  `setDisplayLock(AxisLock)` — display-only зеркало Draft-маски для адаптера (действует лишь при
+  `constrainEnabled==false`, сбрасывается при включении). `setConstrainEnabled(bool)` — выключается **только** в
   Draft-адаптере (там Draft уже ограничил точку); в собственном пути всегда `true`.
 - **AxisFlowSettings** (`src/AxisFlowSettings.*`) — singleton-`QObject` поверх `ParameterGrp`.
   Все опции компаса + горячие клавиши. Сигнал `changed()`. См. §6.
@@ -155,7 +171,7 @@
   `reformatField` для показа знакового значения.
 - **axisflow_settings.py** — живой немодальный диалог настроек (Python/PySide): двухстолбцовый
   грид имя→значение, редактор по типу (чекбокс/спинбокс/дабл-спинбокс/комбо/кнопка-цвет), приме­
-  нение на лету через `AF.setSetting` (без OK). Диалог секционирован (табы слева, горизонтальный текст: `QListWidget`+`QStackedWidget`) — разделы Compass / Live Line; расширяется одной строкой в нужной секции `_SECTIONS`.
+  нение на лету через `AF.setSetting` (без OK). Диалог секционирован (табы слева, горизонтальный текст: `QListWidget`+`QStackedWidget`) — разделы Compass / Live Line / Behaviour (бывш. Snapping) / Hotkeys; расширяется одной строкой в нужной секции `_SECTIONS`.
   Открывается командой `AxisFlow_Settings`. Ограничение: пока открыт, не подхватывает внешние
   изменения (`changed()` не проброшен в Python), перечитывает при повторном открытии.
 - **axisflow_snap.py** — опциональный Draft-адаптер: оборачивает `Snapper.snap`, зеркалит
@@ -188,9 +204,13 @@
 | `IndexingAxisTransparency` | Float | 0.35 | прозрачность оси-кандидата (0..1) |
 | `Hotkey.<Action>` | ASCII | см. дефолты | список Qt-кодов через запятую; `""` = не назначено |
 
-Действия для ключей клавиш: `ToggleActive` (Insert), `ToggleMode` (Space), `SmartLock`, `LockX`,
-`LockY`, `LockZ`, `ClearLocks`, `CancelEntry`, `CancelCommand` (backtick), `FinishLine` (Escape),
-`ConfirmPoint` (Enter). Enter СТАВИТ точку (commit набранных координат). **Escape = FinishLine**
+Действия для ключей клавиш (дефолты = hotkeys.ini): `ToggleMode` (Space), `ConfirmPoint` (P),
+`SmartLock` (Return/Enter), `LockX/Y/Z/D` (X/Y/Z/D), `SetOrigin` (O), `RotateTop` (T),
+`RotateFront` (F), `RotateSide` (S), `RotateByView` (V), `RotateCycle` (E), `FinishLine`
+(Escape), `CancelCommand` (backtick); без дефолта: `ToggleActive`, `ClearLocks`, `CancelEntry`. Семантика Lock*: заморозить поле на
+текущем значении (галка ставится, поле перестаёт следовать за мышью), повторно — снять; LockX/Y
+только в орто, LockD только в радиальном, LockZ везде (при привязке пинит высоту в системе
+компаса). Enter СТАВИТ точку (commit набранных координат). **Escape = FinishLine**
 (завершить текущую линию, сессия живёт), **backtick = CancelCommand** (завершить всю команду).
 `SmartLock`/`ClearLocks`/`CancelEntry` — без дефолтной клавиши, доступны через API. `setSetting`-имена
 опций: те же, что в таблице, camelCase (`compassSize`, `liveLineEnabled`, `liveLineStyle`, `liveLineColor`, …).
@@ -202,11 +222,15 @@ GUI-редактор — `axisflow_settings.py` (команда `AxisFlow_Settin
 ## 7. Статус
 
 **Готово и в проекте:**
-- Солвер (орто/полярный, лок осей, smart-lock, keyboard-оверрайды, world↔local, nearestAxis),
+- Солвер (орто/полярный, **локи-фиксации полей** — единый механизм с оверрайдами + `LockBit`-маска,
+  включая полярные D/A; smart-lock двумя полями; keyboard-оверрайды, world↔local, nearestAxis),
   сервис-синглтон с сигналами, настройки на `ParameterGrp`, карта хоткеев.
 - Компас Coin3D (контур+заливка+точка, квадрат/круг, без Z, поворот к WP, «всегда показывать»,
   постоянный размер в пикселях) + настраиваемая **живая линия** (вкл/выкл, стиль, цвет).
-- Панель: редактируемые поля с единицами, активное поле по nearestAxis, Tab-цикл, галки лока,
+- Панель: редактируемые поля с единицами (в полярном режиме теперь ТРИ поля — D/A/Z), активное
+  поле по nearestAxis, Tab-цикл, галки лока (галка = поле заморожено: лок ИЛИ набранное значение;
+  клик по галке замораживает/освобождает; в адаптере display-only зеркало Draft-маски —
+  «движение вдоль X» показывается галками на Y и Z),
   «просто печатай», кнопка **Local/World**; ввод AccuDraw — знак по направлению
   (`AxisFlowEntry.h`), первая цифра заменяет, округление/нормализация единиц при потере фокуса.
 - Инструмент/стейт-машина `Idle/Tracking/Finished`, continue-режим; **Escape = FinishLine**
@@ -218,7 +242,17 @@ GUI-редактор — `axisflow_settings.py` (команда `AxisFlow_Settin
   значок верстака; **живой диалог настроек** (`axisflow_settings.py`).
 - **Демо-линия** (вне ядра): многосегментная, собственное Coin-превью, транзакции/undo на каждую
   линию, снятие выделения с готовой линии; Escape — новая линия, backtick — конец.
-- Draft-адаптер (`axisflow_snap.py`).
+- Draft-адаптер (`axisflow_snap.py`); зеркало Draft-маски переведено на display-only канал
+  `setDisplayLock` (реальные локи в адаптере не создаются).
+- **Переработка локов (июль 2026):** галка = заморозка поля. LockX/Y/Z/D фиксируют поле на текущем
+  значении; SmartLock фиксирует два «чужих» поля в 0 (движение строго вдоль ближайшей оси; в
+  полярном — угол на 0/90/180/270 + Z=0); после постановки точки локи сбрасываются (per-point).
+  Старый одноосевой `setAxisLock` (зануление off-axis) удалён; Python `lockAxis` принимает
+  'x'|'y'|'z'|'d'|'a'|'none' и стал идемпотентной установкой, `getState()['lock']` заменён на
+  `getState()['locks']` (dict по слотам). Ось-кандидат остаётся видимой, пока лок прижимает
+  точку к оси (SmartLock-пара, поле, замороженное ровно в 0, полярный угол кратный 90°):
+  `IndexingInput.lockedOnAxisX/Y` взводят `axisActive` ДО гейтов кадра/масштаба — это фидбек
+  лока, не мягкое индексирование; геометрию компас берёт из solved-точки, она уже на оси.
 - **Индексирование живой линии** (локальный фрейм): снап по дистанции (точка-кандидат на конце
   живой линии при приближении длины к запомненной «индексированной дистанции») и по осям (ось-
   кандидат вместо живой линии при приближении к оси X/Y). Допуск в пикселях, чистая математика в
@@ -229,8 +263,8 @@ GUI-редактор — `axisflow_settings.py` (команда `AxisFlow_Settin
   компоненты) — поля X/Y/Z (или D/A) синхронизируются со снапнутой точкой, иначе показывают сырой
   курсор. Точки (центр компаса и кандидат) круглые (`GL_POINT_SMOOTH`, линк с `OpenGL::GL`).
 - **Автотесты**: Tier 1 — C++ gtest (`tests/`, солвер+хоткеи+`AxisFlowEntry`; gtest компилируется
-  из исходников прямо в раннер, 50 кейсов (солвер+хоткеи+entry+indexing), `run_tests.bat`/`ctest`, headless); Tier 2 — Python API
-  (`TestAxisFlow.py`, 15 кейсов, гоняется в GUI-FreeCAD `Test.runTestsFromModule`). Оба зелёные.
+  из исходников прямо в раннер, 73 кейса (солвер+хоткеи+entry+indexing), `run_tests.bat`/`ctest`, headless); Tier 2 — Python API
+  (`TestAxisFlow.py`, 22 кейса, гоняется в GUI-FreeCAD `Test.runTestsFromModule`). Оба зелёные.
   Детали — `TESTING.md`.
 - **Релиз-кит**: `package.xml` (метаданные), `CHANGELOG.md` (Keep a Changelog),
   `stage_dist.bat` (общий стейджинг рантайм-файлов в `dist/AxisFlow`), `make_release.bat`
@@ -240,9 +274,104 @@ GUI-редактор — `axisflow_settings.py` (команда `AxisFlow_Settin
   тарбол из Releases с проверкой SHA256 и **отказом на не-1.1.x FreeCAD**, если не `--force`;
   требует кроссплатформенного CMake для сборки самого `.so`), `RELEASE.md`, `LICENSE`
   (полный LGPL-2.1), раздел Installation в README.
+- **Объектные привязки (Draft Snapper)**: своих не пишем — зовём FreeCAD'овские через тонкий
+  Python-мост `axisflow_snapping.py` (`snap(x,y,ox,oy,oz,has_origin) -> (px,py,pz,hit)`),
+  который дёргает `AxisFlowTool::querySnap` по C-API (модуль кэшируется, ошибки глушатся —
+  привязки никогда не ломают инструмент). `constrain=False`: ограничения наши, Draft не должен
+  применять их второй раз. `lastpoint` = центр компаса — без него не работают extension/
+  parallel/perpendicular/ortho. Факт привязки определяется по видимости снап-маркера Draft
+  (`Snapper.tracker.Visible`), т.к. `snap()` возвращает точку всегда.
+  Приоритеты: введённое значение → лок поля → привязка → индексирование → сырой курсор.
+  Привязанная точка становится «точкой размещения» (`getLocalOffset` берёт её вместо курсора),
+  поэтому лок проецирует именно её, а поля X/Y/Z показывают реальные 3D-координаты привязки
+  (компонента Z больше не обнуляется). Сырой курсор при этом сохраняется — по нему «удержание
+  оси» решает, по какой оси едет пользователь.
+  **Удержание оси при привязке** (безусловное, бывшая настройка «SmartLock» в разделе Snapping —
+  удалена в июле 2026): если в момент привязки курсор шёл вдоль оси в допуске индексирования,
+  точка ОСТАЁТСЯ на этой оси — привязка отдаёт вдоль-осевую координату, прочие компоненты
+  обнуляются, ось-кандидат горит. Курсор вне оси — привязка авторитарна, кандидаты гаснут.
+  Гейты: включено осевое индексирование; при явном локе ветка не нужна — лок прижимает сам.
+  Идея: точка всегда остаётся на оси, вдоль которой двигается курсор. Ключ `SmartLock` в
+  `ParameterGrp` больше не читается (остатки на диске безвредны). Палитра привязок —
+  переиспользуем команды `Draft_Snap_*` в своём тулбаре (состояние общее с Draft/BIM).
+- **Анимация поворота компаса** («Compass rotation animation (s)», ключ `CompassRotateAnimation`,
+  float 0..2 c клампом, дефолт 0.5; 0 = мгновенно): чисто визуальная — солвер переключает
+  плоскость сразу, компас доворачивается slerp'ом со smoothstep-изингом на `SoTimerSensor`
+  (~60 fps) внутри `AxisFlowCompass::setPlane`. Ключевое: display-базис `_u/_v/_n` (по нему
+  считается живая линия) интерполируется в ногу с трансформом (`applyRotationNow` выводит его из
+  той же SbRotation), иначе конец линии «отклеивался» бы от курсора на время анимации; финальный
+  кадр ставит точный целевой базис (без числового дрейфа). Первый setPlane после создания —
+  мгновенный (активация не должна «выплывать» из identity); ретаргет на лету стартует из текущей
+  интерполированной позы, так что быстрые T-F-S цепляются плавно. Сенсор гасится в деструкторе.
+- **Пакет view/origin-действий и починка ToggleActive (июль 2026):**
+  `SetOrigin` (O) — перенос origin компаса в текущую solved-точку (со снапом) БЕЗ подтверждения
+  точки: `setOriginToCursor()` в сервисе не эмитит `pointConfirmed`, команда рисования указание
+  игнорирует; чистит typed-значения/локи, взводит follow-референс; компас перепривязывается сразу
+  (синк origin добавлен в `onServiceStateChanged` тула). `RotateTop/Front/Side` — фикс-базисы
+  через `setPlane` (Front: n=−Y, v=+Z, u=+X; Side: n=+X, v=+Z, u=+Y); `RotateCycle` (E) — цикл
+  Top→Front→Side с досевом индекса из явных Rotate*; `RotateByView` (V) — сервис эмитит
+  `alignToViewRequested`, тул строит базис из ориентации камеры (right/up/back). **ToggleActive
+  починен**: фильтр событий при выключенном сервисе теперь перехватывает ровно одну клавишу —
+  привязанную к ToggleActive (ShortcutOverride+KeyPress, с inScope-гейтом) — раньше выключение
+  было односторонним. Дефолты built-in переписаны зеркально hotkeys.ini (Insert свободен,
+  ConfirmPoint=P, SmartLock=Enter). Диалог: вкладка Hotkeys разделена на «Control hotkeys» и
+  «View hotkeys»; ConfirmPoint/ClearLocks/CancelEntry из окна убраны (остались биндуемыми через
+  API/ini, метки для конфликт-диалога — в `_HIDDEN_ACTION_LABELS`). Адаптер unbind'ит все новые
+  буквы (P/O/T/F/S/V/E) — однобуквенные шорткаты Draft внутри его команд не крадутся.
+- **«Компас следует направлению»** («Compass follows direction», ключ `CompassFollowDirection`,
+  int 0..2 с клампом, по умолчанию 0=Выкл, enum-строка в Behaviour): при подтверждении точки
+  компас довворачивается по отрезку «предыдущая точка → новая». Режим 1 («оставить Z») —
+  проекция отрезка на текущую плоскость становится осью u, нормаль не меняется; режим 2
+  («полностью») — u = направление отрезка, нормаль берётся максимально близкой к старой
+  (Грам-Шмидт; отрезок вдоль старой нормали → новой нормалью становится старая v). Математика —
+  `AxisFlowSolver::rotateToDirection(dir, keepNormal)` (Tier-1). Поворот происходит в `confirm()`
+  ДО переноса origin и гейтится флагом `_hasFollowRef`: свежая сессия (`beginInput` →
+  `clearFollowReference()`) не вертит компас по отрезку от «прошлогоднего» origin; засеянная
+  база (`setOrigin`, т.е. `last` в getPoint) флаг взводит — первый же отрезок валиден. Внешний
+  `setPlane`/`resetPlane` поворот перекрывают штатно.
+- **«Переход фокуса при движении»** («Focus advance on movement», ключ `FocusAdvanceOnMove`,
+  по умолчанию включён, раздел Behaviour): после набора значения в поле X (Y) осознанное движение
+  курсора (> 6 px, порог в `focusAdvanceExceeded` из `AxisFlowEntry.h` — чистый предикат под
+  Tier-1) завершает ввод и переносит каретку в смежное поле Y (X); в полярном — D↔A. Введённое
+  значение остаётся оверрайдом, поле переформатируется как при blur. Якорь перевзводится каждым
+  принятым нажатием (`pushFieldValue` — единая воронка ввода), так что дрожание мыши во время
+  набора ввод не крадёт; без камеры (`viewScale()<=0`) не срабатывает. Дизарм: Enter/Tab/blur/
+  Escape/пустое поле/подтверждение точки. Поле Z в переходе не участвует. После перехода
+  взводится `_advanceHold`: авто-таргетинг по nearestAxis заморожен (иначе курсор, всё ещё
+  прижатый к прежней оси, украл бы каретку обратно); холд снимают Tab, Escape и постановка точки.
+- **Знак-от-направления стал опциональным** («Smart negative direction», ключ
+  `SmartNegativeDirection`, по умолчанию включён): без знака введённая величина берёт знак
+  направления курсора по оси (гейт — в `pushFieldValue` панели; чистое правило
+  `signedByDirection` в `AxisFlowEntry.h` не изменилось). Выключено — знак буквально как введён.
+  Раздел настроек «Snapping» переименован в «Behaviour», галка живёт там.
+- **Вкладка Hotkeys в диалоге настроек**: третий раздел (после Compass / Live Line) со списком
+  действий, кнопкой захвата клавиши (клик → «Press a key…» → нажатие), кнопкой ✕ и «Restore
+  default keys». Отказ от Ctrl/Alt/Meta (их фильтр всё равно не перехватывает), предупреждение
+  при конфликте (карта — key→action, поэтому назначение отбирает клавишу у другого действия).
+  Новое C++/Python API: `setHotkeys(action, [codes])` (список — чтобы не терять вторую клавишу
+  у `ConfirmPoint`) и `resetHotkeys()` (чистит только `Hotkey.*`, прочие опции не трогает).
+- **`package.xml` требует `<subdirectory>./</subdirectory>`** в `<content><workbench>`: если тега
+  нет, FreeCAD подставляет `<name>` и ищет `Mod/AxisFlow/AxisFlow/InitGui.py` → верстак молча
+  пропадает из списка (`Initializing ...\AxisFlow\AxisFlow(InitGui.py not found)... ignore`).
+  Проявляется только когда `package.xml` реально установлен в Mod (см. install-правило).
+- **Дефолтные хоткеи в `hotkeys.ini`** (россыпью в Mod, не в `.qrc`): правятся без пересборки.
+  Слои, позже — сильнее: встроенный layout в коде (фолбэк, битый/отсутствующий файл не ломает
+  старт) → `hotkeys.ini` → пользовательские привязки в `ParameterGrp`. Парсер в
+  `AxisFlowSettings::loadHotkeyDefaultsFile` (имена клавиш через `QKeySequence::fromString`,
+  raw-коды, инлайн-комментарии `;`/`#`, одиночный символ = сама клавиша, отказ на
+  `Qt::Key_unknown` с предупреждением в Report view). Путь подаёт `InitGui.py`; API
+  `AxisFlow.loadHotkeyDefaults(path)` перечитывает без рестарта. Есть install-правило в CMake.
+- **i18n (по политике FreeCAD)**: интерфейс следует глобальному языку FreeCAD (Preferences →
+  General → Language) — своего переключателя нет, при первом старте берётся язык FreeCAD.
+  Строки помечены `translate("AxisFlow", …)`/`QT_TRANSLATE_NOOP` (Python, диалог настроек) и
+  `QT_TR_NOOP`/`tr()` (C++: команды, панель World/Local). Регистрация пути в `InitGui.py`
+  (`addLanguagePath`+`updateLocale`). Исходники/компиляция в `translations/` (`AxisFlow.ts` —
+  база; языки de/fr/hu/zh-CN/ko/hi/sr/ru — `.ts`+`.qm`, машинные стартовые переводы под ревью).
+  Инструмент `update_translations.py`
+  (`pylupdate`/`lupdate`→`lconvert`→`lrelease`), гайд `TRANSLATING.md`. `.qm` едут в поставке
+  (стейджинг + NSIS). Проверено: `.qm` резолвит строки по контекстам (диалог/команды/панель).
 
 **Не сделано / известные хвосты:**
-- Полярный лок в решателе (ветка Polar в `getSolvedPoint()` игнорирует `_lock`); лок одноосевой.
 - Типизированный абсолютный/относительный ввод сверх пере-axis World-конверсии.
 - Докируемая панель (сейчас только плавающее `Qt::Tool`-окно).
 - `solver()` ещё торчит в публичном API (подлежит удалению).
@@ -324,7 +453,6 @@ REM install кладёт .pyd + InitGui/axisflow_*.py + Resources (+ TestAxisFlo
 ## 10. Известные ограничения
 
 - Одна активная сессия ввода (следствие синглтона, §3.3).
-- Полярный лок не реализован в решателе; лок одноосевой.
 - Компас: размер в пикселях пересчитывается на движении курсора и смене настроек, но не на
   «чистом» зуме без движения мыши. Цвет заливки и обводки не настраиваемые (настраивается только
   прозрачность заливки).
@@ -397,8 +525,10 @@ REM install кладёт .pyd + InitGui/axisflow_*.py + Resources (+ TestAxisFlo
 
 **Обычный приоритет:**
 
-9. Полярный (радиальный) лок в решателе (ветка Polar в `getSolvedPoint`), живые D/A.
-10. Многоосевой лок (X+Y = плоскостной).
+9. ✅ Закрыто переработкой локов: полярные D/A фиксируются тем же слот-механизмом
+   (`lockValueDist/lockValueAngle`), тесты `PolarAngleLockConstrainsToRay` /
+   `PolarDistanceLockFixesTheLength` активны. Полноценное тестирование полярного режима — позже.
+10. ✅ Закрыто там же: локи независимы по полям, любая комбинация (SmartLock = двухполевой).
 11. Убрать `solver()` из публичного API; подготовить миграцию синглтон → `AxisFlowSession`.
 12. Sketcher — интеграция через патч `DrawSketchHandler` (большая отдельная задача).
 13. **Значок воркбенча и кнопки** — ✅ Сделано. Пять SVG в `Resources/icons/` (`AxisFlow` +
@@ -437,8 +567,8 @@ REM install кладёт .pyd + InitGui/axisflow_*.py + Resources (+ TestAxisFlo
 Три уровня (подробно — `TESTING.md`):
 - **Tier 1 — C++ gtest** (`tests/`): чистая логика (солвер, хоткеи, `AxisFlowEntry`), без FreeCAD и
   дисплея. gtest компилируется из исходников прямо в раннер (см. §9.10). Запуск: `run_tests.bat`
-  или `-DAXISFLOW_BUILD_TESTS=ON` + `ctest` (pixi-DLL на PATH). 50 кейсов, +1 `DISABLED_`
-  (полярный лок — маркер будущей фичи).
+  или `-DAXISFLOW_BUILD_TESTS=ON` + `ctest` (pixi-DLL на PATH). 73 кейса, `DISABLED_` нет
+  (бывший маркер полярного лока заменён живыми тестами).
 - **Tier 2 — Python API** (`TestAxisFlow.py`): реальный `.pyd` в GUI-FreeCAD
   (`import Test, TestAxisFlow; Test.runTestsFromModule(TestAxisFlow)`). Модуль Gui-связан, в
   `freecadcmd` не импортируется. Недеструктивно (снимок настроек, хоткеи с `persist=False`).
@@ -453,7 +583,7 @@ AxisFlow — **компилируемый C++-верстак** (`AxisFlow.pyd`).
 
 **ABI-замок:** `.pyd` грузится только в FreeCAD с совпадающими Python/Qt/Coin ABI — собирать против
 той же дистрибуции, что у пользователей, и проверять ZIP на чистой установке. Имя вида
-`AxisFlow-0.1.2-win64-FC1.1.zip`.
+`AxisFlow-0.1.3-win64-FC1.1.zip`.
 
 Инструменты: `make_release.bat` (собирает рантайм-папку `dist/AxisFlow` — только `.pyd`+`.py`+
 `Resources`+`package.xml`+`LICENSE` — и жмёт ZIP через PowerShell), `package.xml` (метаданные),

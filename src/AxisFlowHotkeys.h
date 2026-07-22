@@ -19,6 +19,13 @@ enum class AxisAction {
     LockX,
     LockY,
     LockZ,
+    LockD,          // polar mode: freeze the Distance field (rect: no-op)
+    SetOrigin,      // move the compass origin to the cursor -- NOT a point
+    RotateTop,      // compass = global axes
+    RotateFront,    // compass Z -> global -Y, compass Y -> global +Z
+    RotateSide,     // compass Z -> global +X, compass Y -> global +Z
+    RotateByView,   // compass follows the current camera orientation
+    RotateCycle,    // Top -> Front -> Side -> Top ...
     ClearLocks,
     CancelEntry,    // Escape: cancel value entry, then (next press) release locks
     CancelCommand,  // separate key: end the drawing command
