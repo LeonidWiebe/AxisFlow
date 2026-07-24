@@ -19,6 +19,9 @@ class AxisFlowTool;
  *   callback(point, ok)  - a point was confirmed (ok=True), or the input was
  *                          cancelled (point=None, ok=False).
  *   movecallback(point)  - the live point on every cursor move (optional).
+ *   modecallback()       - the ToggleSegmentMode key was pressed (optional).
+ *                          AxisFlow gives the keypress no meaning of its own;
+ *                          the consumer decides what its "mode" is.
  *
  * continuous=False: callback fires once, then the bridge finishes.
  * continuous=True : callback fires per point until cancel; the final cancel
@@ -40,6 +43,7 @@ public:
                    PyObject* callback,
                    PyObject* moveCallback,
                    PyObject* finishCallback,
+                   PyObject* modeCallback,
                    bool continuous,
                    QObject* parent = nullptr);
     ~GetPointBridge() override;
@@ -55,18 +59,21 @@ private Q_SLOTS:
     void onPoint(Base::Vector3d p);   // tool->pointConfirmed
     void onCancel();                  // service->cancelRequested
     void onFinish();                  // service->finishRequested (keep session)
+    void onModeToggle();              // service->segmentModeRequested
     void onMove(Base::Vector3d p);    // service->cursorMoved
 
 private:
     void callPoint(const Base::Vector3d* p, bool ok);
     void callMove(const Base::Vector3d& p);
     void callFinish();
+    void callMode();
     void finish();
 
     AxisFlowTool* _tool;
     PyObject*     _cb;
     PyObject*     _moveCb;
     PyObject*     _finishCb;
+    PyObject*     _modeCb;
     bool          _continuous;
 
     static GetPointBridge* s_active;

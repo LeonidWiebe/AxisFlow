@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(AxisFlow VERSION 0.1.3 LANGUAGES CXX)
+project(AxisFlow VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -105,6 +105,9 @@ set(HEADERS
     src/AxisFlowHotkeys.h
     src/AxisFlowSolver.h
     src/AxisFlowIndexing.h
+    src/AxisFlowPath.h
+    src/AxisFlowKeyRouting.h
+    src/AxisFlowKeyContext.h
     src/AxisFlowCompass.h
     src/AxisFlowPanel.h
     src/AxisFlowEventFilter.h

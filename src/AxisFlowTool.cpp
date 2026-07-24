@@ -1,5 +1,7 @@
 #include "PreCompiled.h"
 
+#include <QtCore/QTimer>
+
 #include "AxisFlowTool.h"
 #include "AxisFlowPanel.h"
 #include "AxisFlowEventFilter.h"
@@ -17,15 +19,12 @@
 #include <Inventor/sensors/SoNodeSensor.h>
 #include <Inventor/events/SoMouseButtonEvent.h>
 #include <Inventor/events/SoLocation2Event.h>
-#include <Inventor/events/SoKeyboardEvent.h>
 #include <Inventor/SbViewVolume.h>
 #include <Inventor/SbPlane.h>
 #include <Inventor/SbLine.h>
 
 #include <Base/Vector3D.h>
 #include <Base/Interpreter.h>   // PyGILStateLocker + Python.h
-
-#include <QtGui/QKeyEvent>   // Qt::Key_*
 
 #include <cmath>
 
@@ -41,6 +40,15 @@ AxisFlowTool::AxisFlowTool(Gui::View3DInventor* view, QObject* parent)
     // the object lifetime: with deferred destruction a just-deactivated tool
     // can briefly outlive its replacement and must not react in the meantime.
     _compass = new AxisFlowCompass;
+
+    // The one connection that IS tied to this object's lifetime: closing a
+    // document destroys its view, and everything we hang off that view -- the
+    // scenegraph nodes, the camera, the viewer -- goes with it. Tear down here,
+    // while the tool is still alive, instead of discovering the corpse later.
+    if (_view) {
+        connect(_view.data(), &QObject::destroyed,
+                this, &AxisFlowTool::onViewDestroyed);
+    }
 }
 
 AxisFlowTool::~AxisFlowTool()
@@ -51,10 +59,21 @@ AxisFlowTool::~AxisFlowTool()
 
 // ---------------------------------------------------------------------------
 
+AxisFlowTool* AxisFlowTool::s_current = nullptr;
+
 void AxisFlowTool::activate(bool withPositionSource)
 {
     if (_active) return;
+
+    // One session at a time, whoever owns it: the palette command and the
+    // Python API (getPoint) each hold a tool of their own. Standing the other
+    // one down FIRST matters -- its deactivate() clears s_current, so claiming
+    // it before this point would make the check see itself and skip.
+    if (s_current && s_current != this)
+        s_current->deactivate();
+
     _active = true;
+    s_current = this;
     _hasPositionSource = withPositionSource;
 
     // Listen to the service only while active. The guard above rules out a
@@ -69,6 +88,17 @@ void AxisFlowTool::activate(bool withPositionSource)
     connect(&svc, &AxisFlowService::alignToViewRequested, this, &AxisFlowTool::alignPlaneToView);
     connect(&AxisFlowSettings::instance(), &AxisFlowSettings::changed,
             this, &AxisFlowTool::onSettingsChanged);
+
+    // The view can already be gone: the tool may have been parked while its
+    // document was closed. Without a view there is no scenegraph to hang the
+    // compass on, so there is nothing to activate.
+    if (!_view) {
+        _active = false;
+        if (s_current == this)
+            s_current = nullptr;
+        Base::Console().warning("AxisFlow: the 3D view is gone; not activating.\n");
+        return;
+    }
 
     Gui::View3DInventorViewer* viewer = _view->getViewer();
     SoSeparator* root = static_cast<SoSeparator*>(viewer->getSceneGraph());
@@ -98,7 +128,7 @@ void AxisFlowTool::activate(bool withPositionSource)
     // shortcuts before the key ever reaches the 3-D view widget.
     //   own tool -> also claim digits ("just start typing")
     //   adapter  -> claim only bound action keys; digits belong to Draft
-    _keyFilter = new AxisFlowEventFilter(_view, withPositionSource, this);
+    _keyFilter = new AxisFlowEventFilter(_view.data(), withPositionSource, this);
     _keyFilter->install();
 
     AxisFlowService::instance().activate();
@@ -124,7 +154,18 @@ void AxisFlowTool::activate(bool withPositionSource)
 
 void AxisFlowTool::deactivate()
 {
+    // Called from inside the Coin callback (a consumer ending the session from
+    // its move/point handler)? Then the node we are about to unref is the one
+    // being dispatched. Record it and let handleCoinEvent run the teardown
+    // once Coin is done with the node.
+    if (_inCoinCallback) {
+        _deactivateDeferred = true;
+        return;
+    }
+
     if (!_active) return;
+    if (s_current == this)
+        s_current = nullptr;
     _active = false;
 
     // Stop listening immediately. With deferred destruction this object may
@@ -156,15 +197,21 @@ void AxisFlowTool::deactivate()
         _keyFilter = nullptr;
     }
 
-    Gui::View3DInventorViewer* viewer = _view->getViewer();
-    SoSeparator* root = static_cast<SoSeparator*>(viewer->getSceneGraph());
-
+    // Scenegraph teardown only makes sense while the view is alive. When the
+    // document was closed the viewer, its scenegraph and our nodes in it are
+    // already gone -- touching them here was the crash. The Coin callback still
+    // has to be unref'd: we own that reference regardless of the view.
+    if (_view) {
+        Gui::View3DInventorViewer* viewer = _view->getViewer();
+        SoSeparator* root = static_cast<SoSeparator*>(viewer->getSceneGraph());
+        if (_eventCB)
+            root->removeChild(_eventCB);
+        root->removeChild(_compass->getRootNode());
+    }
     if (_eventCB) {
-        root->removeChild(_eventCB);
         _eventCB->unref();
         _eventCB = nullptr;
     }
-    root->removeChild(_compass->getRootNode());
 
     AxisFlowPanel::instance()->hide();
 }
@@ -177,6 +224,26 @@ void AxisFlowTool::coinEventCB(void* userData, SoEventCallback* node)
 }
 
 void AxisFlowTool::handleCoinEvent(SoEventCallback* node)
+{
+    // Everything below can call into Python -- object snapping, and
+    // cursorMoved reaching the getPoint consumer -- and the consumer may end
+    // the session from there. Deactivating synchronously would destroy this
+    // very SoEventCallback mid-dispatch, so the guard defers it to the event
+    // loop instead.
+    _inCoinCallback = true;
+    handleCoinEventBody(node);
+    _inCoinCallback = false;
+
+    if (_deactivateDeferred) {
+        _deactivateDeferred = false;
+        // Context object `this`: if the tool is destroyed first (endSession
+        // also calls deleteLater), Qt drops the call instead of running it on
+        // a corpse -- and the destructor deactivates anyway.
+        QTimer::singleShot(0, this, [this] { deactivate(); });
+    }
+}
+
+void AxisFlowTool::handleCoinEventBody(SoEventCallback* node)
 {
     const SoEvent* event = node->getEvent();
 
@@ -221,25 +288,14 @@ void AxisFlowTool::handleCoinEvent(SoEventCallback* node)
         return;
     }
 
-    if (event->isOfType(SoKeyboardEvent::getClassTypeId())) {
-        const auto* ke = static_cast<const SoKeyboardEvent*>(event);
-        if (ke->getState() != SoButtonEvent::DOWN) return;
-
-        // Value entry is NOT handled here. Two reasons: Qt resolves global
-        // shortcuts before the key ever reaches this callback (see
-        // AxisFlowEventFilter), and SoKeyboardEvent::getPrintableCharacter()
-        // returns '.' as a placeholder for keys with no printable form -- so
-        // Backspace used to type a dot. Typing lives in the Qt filter alone.
-        AxisFlowService& svc = AxisFlowService::instance();
-        int qtKey = coinKeyToQt(ke->getKey());
-        if (qtKey != 0) {
-            AxisAction a = svc.actionForKey(qtKey);
-            if (a != AxisAction::None) {
-                svc.performAction(a);
-                node->setHandled();
-            }
-        }
-    }
+    // NOTE: keyboard events are deliberately NOT handled here. Qt resolves
+    // global shortcuts (bare digits are bound to Std_ViewTop and friends)
+    // before the key ever reaches this callback, so AxisFlowEventFilter claims
+    // every key we care about at the qApp level and this branch could only ever
+    // see keys nobody wants. It used to carry a second, always-incomplete key
+    // map (it never learned P/O/T/F/S/V/E or the backtick) that also ignored
+    // modifiers, so Ctrl+Y could fire the Y lock. One key policy now:
+    // routeKey() in AxisFlowKeyRouting.h.
 }
 
 // ---------------------------------------------------------------------------
@@ -308,6 +364,7 @@ void AxisFlowTool::hideSnapMarkers()
 
 SbVec3f AxisFlowTool::unprojectToCompassPlane(const SbVec2s& pixel)
 {
+    if (!_view) return SbVec3f(0, 0, 0);
     Gui::View3DInventorViewer* viewer = _view->getViewer();
 
     SoCamera* cam = viewer->getSoRenderManager()->getCamera();
@@ -395,12 +452,6 @@ void AxisFlowTool::placePoint(const Base::Vector3d& world)
     _state = _continueMode ? InputState::Tracking : InputState::Finished;
 
     Q_EMIT pointConfirmed(world);
-}
-
-void AxisFlowTool::handleEscape()
-{
-    // Layered cancel lives in the panel (it owns the entry state).
-    AxisFlowPanel::instance()->cancelInput();
 }
 
 void AxisFlowTool::cancelInput()
@@ -495,8 +546,26 @@ void AxisFlowTool::syncCompassSize()
 void AxisFlowTool::refreshIndexingCandidates()
 {
     if (!_compass) return;
-    const IndexingResult r = AxisFlowService::instance().currentIndexing();
+    AxisFlowService& svc = AxisFlowService::instance();
+    const IndexingResult r = svc.currentIndexing();
     _compass->setIndexingCandidates(r.distanceActive, r.axisActive);
+
+    // Compass path: drawn exactly when the point stops being "wherever the
+    // cursor is" -- an object snap has claimed it, or a coordinate field is
+    // frozen and holding one of its components.
+    //
+    // The in-plane lock flags only make sense in ortho mode, where fields 0
+    // and 1 ARE the plane's two axes. In radial mode they are distance and
+    // angle, which do not map to an axis leg, so the path falls back to the
+    // plain "in-plane leg, then normal leg" shape.
+    const bool ortho = (svc.mode() == CompassMode::Rectangular);
+    const Base::Vector3d sp = svc.snapPoint();
+    _compass->setPathState(
+        svc.snapActive() || svc.anyFieldFixed(),
+        ortho && svc.hasKeyValue(0),
+        ortho && svc.hasKeyValue(1),
+        svc.snapActive(),
+        SbVec3f(float(sp.x), float(sp.y), float(sp.z)));
 }
 
 void AxisFlowTool::onSettingsChanged()
@@ -530,6 +599,18 @@ void AxisFlowTool::cameraChangedCB(void* userData, SoSensor*)
     AxisFlowService::instance().refreshCursor();
 }
 
+void AxisFlowTool::onViewDestroyed()
+{
+    // Drop the view FIRST, then tear down. deactivate() skips every
+    // view-dependent step when _view is null, so this is a teardown that
+    // touches only what we own: the panel, the service, the key filter and our
+    // Coin reference. Clearing it by hand rather than trusting QPointer to have
+    // been cleared already keeps the ordering independent of Qt's internals
+    // (for widgets, destroyed() is emitted from ~QWidget).
+    _view = nullptr;
+    deactivate();
+}
+
 void AxisFlowTool::attachCameraSensor()
 {
     if (_camSensor || !_view) return;
@@ -543,28 +624,28 @@ void AxisFlowTool::attachCameraSensor()
 
     // Without this the compass keeps the size it had when the session started:
     // in adapter mode nothing drives cursorMoved, and zooming never resizes it.
+    //
+    // The camera is ref'd for as long as the sensor watches it. Otherwise the
+    // view's destruction frees the camera under a still-attached sensor, and
+    // detaching afterwards writes into freed memory.
     _camSensor = new SoNodeSensor(&AxisFlowTool::cameraChangedCB, this);
+    _camWatched = cam;
+    _camWatched->ref();
     _camSensor->attach(cam);
 }
 
 void AxisFlowTool::detachCameraSensor()
 {
     if (!_camSensor) return;
+    // Safe even after the view died: our own reference has kept the camera
+    // alive precisely so that this detach has something to detach from.
     _camSensor->detach();
     delete _camSensor;
     _camSensor = nullptr;
-}
 
-int AxisFlowTool::coinKeyToQt(int coinKey)
-{
-    switch (coinKey) {
-    case SoKeyboardEvent::RETURN: return Qt::Key_Return;  // Coin aliases ENTER to RETURN
-    case SoKeyboardEvent::SPACE:  return Qt::Key_Space;
-    case SoKeyboardEvent::X:      return Qt::Key_X;
-    case SoKeyboardEvent::Y:      return Qt::Key_Y;
-    case SoKeyboardEvent::Z:      return Qt::Key_Z;
-    case SoKeyboardEvent::ESCAPE: return Qt::Key_Escape;
-    default: return 0;
+    if (_camWatched) {
+        _camWatched->unref();     // may well be the last reference now
+        _camWatched = nullptr;
     }
 }
 

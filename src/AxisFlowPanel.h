@@ -13,6 +13,8 @@
 
 #include <Base/Vector3D.h>
 
+#include "AxisFlowHotkeys.h"   // AxisAction (actionLabel, chord hint)
+
 namespace AxisFlowGui {
 
 /**
@@ -54,6 +56,10 @@ public:
     bool backspaceEntry();
     /** Delete/clear the whole entry, releasing its override. */
     bool clearEntry();
+    /** A value is being typed right now (as opposed to the field merely having
+     *  the caret, which it almost always does). Backspace and Delete belong to
+     *  AxisFlow only while this is true. */
+    bool entryInProgress() const { return _entryField >= 0; }
 
     /**
      * Layered cancel (Escape). First press aborts an in-progress value entry and
@@ -94,6 +100,10 @@ public:
 protected:
     void keyPressEvent(QKeyEvent* e) override;
     void closeEvent(QCloseEvent* e) override;
+    /** The hint is its own window, so it has to follow the panel and go away
+     *  with it. */
+    void moveEvent(QMoveEvent* e) override;
+    void hideEvent(QHideEvent* e) override;
     /**
      * Filters the child line edits so bound letter keys (X/Y/Z/Space/...) act as
      * AxisFlow actions instead of being typed, while digits still edit the field.
@@ -113,10 +123,6 @@ private:
     static double parseQuantity(const QString& text);
     /** Push a field's text to the service as a keyboard override. */
     void pushFieldValue(int index, const QString& text);
-    /** True for keys that edit the number rather than trigger an action. */
-    static bool isValueKey(const QKeyEvent* ke);
-    /** True for a character that begins a fresh value entry (digit, sign, dot). */
-    static bool isEntryStartKey(const QKeyEvent* ke);
     /** The line edit currently receiving typed characters. */
     QLineEdit* entryEdit();
     /** Repaint the field backgrounds so the active one stands out. */
@@ -129,6 +135,14 @@ private:
     void maybeAdvanceFocus();
     /** Reflect the current readout frame (Local/World) on the frame button. */
     void updateFrameButton();
+    /** Show which second keys are on offer while a two-key chord is pending,
+     *  and hide the hint again once it resolves. */
+    void updateChordHint();
+    /** Park the hint window beside the panel (left side if there is no room
+     *  on the right), sized to its text. */
+    void positionChordHint();
+    /** Short, translated description of an action, for the chord hint. */
+    static QString actionLabel(AxisAction a);
     /** Round a committed manual entry to the standard precision on focus-out. */
     void reformatField(int index);
     /** Decimals shown per field: 2 for the polar angle, 4 otherwise. */
@@ -147,6 +161,11 @@ private:
     QLabel*      _labelB {nullptr};
     QLabel*      _labelC {nullptr};
     QPushButton* _frameBtn {nullptr};   // toggles Local <-> World readout
+    /** "R -> X / Y / Z" while a chord waits. A SEPARATE top-level window, not
+     *  a row in the layout: as a layout item it changed the panel's minimum
+     *  size, and the resulting adjustSize() fought the window manager (Qt
+     *  logged "Unable to set geometry ... minimum size" on every press). */
+    QLabel*      _chordHint {nullptr};
 
     bool         _polar { false };
     bool         _worldFrame { false };   // false = compass-local, true = world

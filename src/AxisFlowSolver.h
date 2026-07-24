@@ -97,6 +97,9 @@ public:
     bool typedEntryActive() const;
     /** An in-plane slot is locked (rect: X/Y; polar: dist/angle) -- suppresses
      *  the axis candidate, which would just duplicate the lock. */
+    /** Any in-plane slot locked (X/Y in rectangular, distance/angle in radial).
+     *  NOTE: no longer used by indexing -- that now asks per axis whether the
+     *  component it would collapse is free. Kept as a plain query. */
     bool inPlaneLocked() const;
 
     /** Clear all keyboard overrides (public; used by the service on confirm). */
@@ -190,6 +193,12 @@ public:
      *  to the old one as possible (old v is the fallback when the new u is
      *  parallel to the old normal). A near-zero direction is a no-op. */
     void rotateToDirection(const Base::Vector3d& worldDir, bool keepNormal);
+
+    /** Turn the whole compass about ONE OF ITS OWN axes (0 = u/X, 1 = v/Y,
+     *  2 = n/Z) by @p deg degrees, right-hand rule. This is MicroStation's
+     *  "rotate about x/y/z": the axis stays put and the other two swing round
+     *  it, so R X twice flips the plane over. Out-of-range axis is a no-op. */
+    void rotateAboutAxis(int axis, double deg);
 
     const Base::Matrix4D& getCompassMatrix() const { return _compass; }
 

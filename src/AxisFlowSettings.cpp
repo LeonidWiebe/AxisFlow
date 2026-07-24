@@ -7,11 +7,13 @@
 #include <Base/Console.h>
 
 #include <QtCore/QFile>
+#include <QtCore/QRegularExpression>
 #include <QtCore/QStringList>
 #include <QtCore/QTextStream>
 #include <QtGui/QKeySequence>
 
 #include <algorithm>
+#include <cctype>
 #include <string>
 #include <vector>
 
@@ -21,33 +23,37 @@ namespace {
 const char* kPath = "User parameter:BaseApp/Preferences/Mod/AxisFlow";
 
 // Defaults kept in one place so load() and resetDefaults() cannot drift apart.
-constexpr int    kDefCompassSize   = 100;
-constexpr int    kDefAxisThickness = 4;
-constexpr double kDefAxisStartPct  = 0.80;
-constexpr double kDefAxisLengthPct = 0.35;
-constexpr unsigned long kDefColorX = 0xFF0000FFul;   // red
-constexpr unsigned long kDefColorY = 0x00FF00FFul;   // green
-constexpr unsigned long kDefActiveField = 0xDCDCDCFFul;   // a touch darker than a plain field
-constexpr double kDefFillTransp    = 0.65;
-constexpr bool   kDefAlwaysShow    = false;
-constexpr bool          kDefLiveLineEnabled = false;
-constexpr int           kDefLiveLineStyle   = 0;   // solid
-constexpr unsigned long kDefLiveLineColor   = 0x00AAFFFFul;   // cyan-blue
-
-constexpr bool   kDefUseDistIdx     = true;
-constexpr bool   kDefUseAxesIdx     = true;
-constexpr int    kDefIndexTol       = 15;     // pixels
-constexpr double kDefLiveLineTransp = 0.50;
-constexpr int    kDefIdxAxisWeight  = 8;      // pixels
-constexpr double kDefIdxAxisTransp  = 0.50;
-
-constexpr bool   kDefUseSnapping = true;
-constexpr bool   kDefSmartNegative = true;
-constexpr bool   kDefFocusAdvance = true;
-constexpr int    kDefCompassFollow = 0;
+// Derived from AxisFlowDefaults (the public, single source of truth) so the
+// existing code below keeps its short local names without duplicating a value.
+using D = AxisFlowDefaults;
+constexpr int    kDefCompassSize   = D::compassSize;
+constexpr int    kDefAxisThickness = D::axisThickness;
+constexpr double kDefAxisStartPct  = D::axisStartPct;
+constexpr double kDefAxisLengthPct = D::axisLengthPct;
+constexpr unsigned long kDefColorX = D::axisColorX;
+constexpr unsigned long kDefColorY = D::axisColorY;
+constexpr unsigned long kDefActiveField = D::activeFieldColor;
+constexpr double kDefFillTransp    = D::fillTransparency;
+constexpr bool   kDefAlwaysShow    = D::alwaysShowCompass;
+constexpr bool          kDefLiveLineEnabled = D::liveLineEnabled;
+constexpr int           kDefLiveLineStyle   = D::liveLineStyle;
+constexpr unsigned long kDefLiveLineColor   = D::liveLineColor;
+constexpr bool   kDefUseDistIdx     = D::useDistanceIndexing;
+constexpr bool   kDefUseAxesIdx     = D::useAxesIndexing;
+constexpr int    kDefIndexTol       = D::indexingTolerance;
+constexpr double kDefLiveLineTransp = D::liveLineTransparency;
+constexpr int    kDefIdxAxisWeight  = D::indexingAxisWeight;
+constexpr double kDefIdxAxisTransp  = D::indexingAxisTransparency;
+constexpr bool   kDefUseSnapping = D::useSnapping;
+constexpr bool   kDefSmartNegative = D::smartNegativeDirection;
+constexpr bool   kDefFocusAdvance = D::focusAdvanceOnMove;
+constexpr bool          kDefPathEnabled = D::compassPathEnabled;
+constexpr int           kDefPathStyle   = D::compassPathStyle;
+constexpr unsigned long kDefPathColor   = D::compassPathColor;
+constexpr int    kDefCompassFollow = D::compassFollowDirection;
 
 static int clampFollow(int v) { return v < 0 ? 0 : (v > 2 ? 2 : v); }
-constexpr double kDefRotateAnim = 0.5;
+constexpr double kDefRotateAnim = D::compassRotateAnimation;
 static double clampAnim(double v) { return v < 0.0 ? 0.0 : (v > 2.0 ? 2.0 : v); }
 
 int clampTol(int v)
@@ -147,6 +153,11 @@ void AxisFlowSettings::load()
     _liveLineColor     = g->GetUnsigned("LiveLineColor", kDefLiveLineColor);
     if (_liveLineStyle < 0 || _liveLineStyle > 3) _liveLineStyle = kDefLiveLineStyle;
 
+    _compassPathEnabled = g->GetBool("CompassPathEnabled", kDefPathEnabled);
+    _compassPathStyle   = static_cast<int>(g->GetInt("CompassPathStyle", kDefPathStyle));
+    _compassPathColor   = g->GetUnsigned("CompassPathColor", kDefPathColor);
+    if (_compassPathStyle < 0 || _compassPathStyle > 3) _compassPathStyle = kDefPathStyle;
+
     _useDistanceIndexing = g->GetBool("UseDistanceIndexing", kDefUseDistIdx);
     _useAxesIndexing     = g->GetBool("UseAxesIndexing", kDefUseAxesIdx);
     _indexingTolerance   = clampTol(static_cast<int>(g->GetInt("IndexingTolerance", kDefIndexTol)));
@@ -185,6 +196,9 @@ void AxisFlowSettings::save()
     g->SetBool("LiveLineEnabled", _liveLineEnabled);
     g->SetInt("LiveLineStyle", _liveLineStyle);
     g->SetUnsigned("LiveLineColor", _liveLineColor);
+    g->SetBool("CompassPathEnabled", _compassPathEnabled);
+    g->SetInt("CompassPathStyle", _compassPathStyle);
+    g->SetUnsigned("CompassPathColor", _compassPathColor);
 
     g->SetBool("UseDistanceIndexing", _useDistanceIndexing);
     g->SetBool("UseAxesIndexing", _useAxesIndexing);
@@ -213,6 +227,9 @@ void AxisFlowSettings::resetDefaults()
     _liveLineEnabled   = kDefLiveLineEnabled;
     _liveLineStyle     = kDefLiveLineStyle;
     _liveLineColor     = kDefLiveLineColor;
+    _compassPathEnabled = kDefPathEnabled;
+    _compassPathStyle   = kDefPathStyle;
+    _compassPathColor   = kDefPathColor;
     _useDistanceIndexing = kDefUseDistIdx;
     _useAxesIndexing     = kDefUseAxesIdx;
     _indexingTolerance   = kDefIndexTol;
@@ -330,6 +347,31 @@ void AxisFlowSettings::setLiveLineStyle(int v)
     if (v == _liveLineStyle) return;
     _liveLineStyle = v;
     group()->SetInt("LiveLineStyle", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setCompassPathEnabled(bool v)
+{
+    if (v == _compassPathEnabled) return;
+    _compassPathEnabled = v;
+    group()->SetBool("CompassPathEnabled", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setCompassPathStyle(int v)
+{
+    if (v < 0 || v > 3) v = kDefPathStyle;
+    if (v == _compassPathStyle) return;
+    _compassPathStyle = v;
+    group()->SetInt("CompassPathStyle", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setCompassPathColor(unsigned long rgba)
+{
+    if (rgba == _compassPathColor) return;
+    _compassPathColor = rgba;
+    group()->SetUnsigned("CompassPathColor", rgba);
     Q_EMIT changed();
 }
 
@@ -463,17 +505,37 @@ bool AxisFlowSettings::loadHotkeyDefaultsFile(const std::string& path, Hotkeys& 
             tokens = value.split(QLatin1Char(','), Qt::SkipEmptyParts);
         }
 
-        std::vector<int> keys;
+        // Within one alternative, a space joins the two keys of a chord:
+        //   SmartLock    = Return, Enter   -> two alternative single keys
+        //   RotateAboutX = R X             -> one chord, R then X
+        std::vector<KeyChord> keys;
         for (const QString& tok : tokens) {
-            const int code = parseKeyToken(tok);
-            if (code != 0)
-                keys.push_back(code);
-            else
+            const QStringList parts = tok.trimmed().split(QRegularExpression(QStringLiteral("\\s+")),
+                                                          Qt::SkipEmptyParts);
+            if (parts.isEmpty())
+                continue;
+            if (parts.size() > 2) {
+                Base::Console().warning(
+                    "AxisFlow hotkeys.ini line %d: '%s' has more than two keys; chords are two keys.\n",
+                    lineNo, tok.trimmed().toUtf8().constData());
+                continue;
+            }
+            const int first  = parseKeyToken(parts.at(0));
+            const int second = (parts.size() == 2) ? parseKeyToken(parts.at(1)) : 0;
+            if (first == 0 || (parts.size() == 2 && second == 0)) {
                 Base::Console().warning("AxisFlow hotkeys.ini line %d: unknown key '%s'.\n",
                                         lineNo, tok.trimmed().toUtf8().constData());
+                continue;
+            }
+            keys.push_back(KeyChord{first, second});
         }
 
-        hk.bind(act, keys);   // empty list = explicitly unbound
+        if (!hk.bind(act, keys)) {   // empty list = explicitly unbound
+            Base::Console().warning(
+                "AxisFlow hotkeys.ini line %d: '%s' clashes with the single/chord rule "
+                "(a key is either a single binding or the start of a chord).\n",
+                lineNo, actName.toUtf8().constData());
+        }
     }
 
     return true;
@@ -492,20 +554,41 @@ void AxisFlowSettings::loadHotkeys(Hotkeys& hk)
         if (stored == "-")
             continue;
 
-        // "16777220,16777221" -> both Return and numpad Enter.
-        std::vector<int> keys;
+        // Comma separates alternatives, a space joins the two keys of a chord:
+        // "16777220,16777221" -> Return and numpad Enter; "82 88" -> R then X.
+        std::vector<KeyChord> keys;
         std::size_t pos = 0;
         while (pos < stored.size()) {
             std::size_t comma = stored.find(',', pos);
             if (comma == std::string::npos) comma = stored.size();
-            const std::string tok = stored.substr(pos, comma - pos);
-            if (!tok.empty()) {
-                try { keys.push_back(std::stoi(tok)); }
-                catch (...) { /* skip a corrupt token rather than lose the rest */ }
-            }
+            std::string tok = stored.substr(pos, comma - pos);
             pos = comma + 1;
+
+            // Split the alternative on whitespace: one part = single key, two
+            // parts = chord. Anything longer is corrupt and skipped (chords are
+            // capped at two keys by design).
+            std::vector<int> parts;
+            std::size_t q = 0;
+            while (q < tok.size()) {
+                while (q < tok.size() && std::isspace(static_cast<unsigned char>(tok[q]))) ++q;
+                std::size_t start = q;
+                while (q < tok.size() && !std::isspace(static_cast<unsigned char>(tok[q]))) ++q;
+                if (q > start) {
+                    try { parts.push_back(std::stoi(tok.substr(start, q - start))); }
+                    catch (...) { parts.clear(); break; }   // corrupt: drop this alternative
+                }
+            }
+            if (parts.size() == 1)      keys.push_back(KeyChord{parts[0], 0});
+            else if (parts.size() == 2) keys.push_back(KeyChord{parts[0], parts[1]});
         }
-        hk.bind(a, keys);   // empty list = unbound
+        // A stored layout that breaks the prefix rule (hand-edited user.cfg, or
+        // written by an older build) is refused wholesale: the defaults layer
+        // stands rather than leaving keys that could never resolve.
+        if (!hk.bind(a, keys)) {
+            Base::Console().warning(
+                "AxisFlow: stored keys for '%s' break the single/chord rule; keeping defaults.\n",
+                Hotkeys::name(a));
+        }
     }
 }
 
@@ -516,10 +599,14 @@ void AxisFlowSettings::saveHotkeys(const Hotkeys& hk)
     for (AxisAction a : Hotkeys::allActions()) {
         const std::string key = std::string("Hotkey.") + Hotkeys::name(a);
 
+        // "16777220,16777221" = two alternative single keys.
+        // "82 88"              = one two-key chord (R then X).
         std::string val;
-        for (int k : hk.keysFor(a)) {
+        for (const KeyChord& c : hk.chordsFor(a)) {
             if (!val.empty()) val += ',';
-            val += std::to_string(k);
+            val += std::to_string(c.first);
+            if (c.isChord())
+                val += ' ' + std::to_string(c.second);
         }
         g->SetASCII(key.c_str(), val.c_str());   // "" = unbound
     }

@@ -350,3 +350,91 @@ TEST(Solver, FollowedCompassSolvesInTheNewFrame)
     EXPECT_DOUBLE_EQ(ix.lx, 7.0);                           // local x = 7
     EXPECT_DOUBLE_EQ(ix.ly, 0.0);
 }
+
+// ---- rotate about the compass's own axis ---------------------------------
+
+TEST(Solver, RotateAboutXSwingsYIntoZ)
+{
+    // Right-hand rule about +X: v -> n, n -> -v; u untouched.
+    AxisFlowSolver s;
+    s.rotateAboutAxis(0, 90.0);
+    expectVec(s.getPlaneU(), 1, 0, 0);
+    expectVec(s.getPlaneV(), 0, 0, 1);
+    expectVec(s.getPlaneNormal(), 0, -1, 0);
+}
+
+TEST(Solver, RotateAboutYSwingsZIntoX)
+{
+    AxisFlowSolver s;
+    s.rotateAboutAxis(1, 90.0);
+    expectVec(s.getPlaneU(), 0, 0, -1);
+    expectVec(s.getPlaneV(), 0, 1, 0);
+    expectVec(s.getPlaneNormal(), 1, 0, 0);
+}
+
+TEST(Solver, RotateAboutZSwingsXIntoY)
+{
+    AxisFlowSolver s;
+    s.rotateAboutAxis(2, 90.0);
+    expectVec(s.getPlaneU(), 0, 1, 0);
+    expectVec(s.getPlaneV(), -1, 0, 0);
+    expectVec(s.getPlaneNormal(), 0, 0, 1);
+}
+
+TEST(Solver, FourRotationsReturnToTheStart)
+{
+    AxisFlowSolver s;
+    for (int i = 0; i < 4; ++i)
+        s.rotateAboutAxis(0, 90.0);
+    expectVec(s.getPlaneU(), 1, 0, 0, 1e-9);
+    expectVec(s.getPlaneV(), 0, 1, 0, 1e-9);
+    expectVec(s.getPlaneNormal(), 0, 0, 1, 1e-9);
+}
+
+TEST(Solver, RotateAboutIsRelativeToTheCurrentPlane)
+{
+    // Unlike RotateTop/Front/Side, these work from wherever the compass is.
+    AxisFlowSolver s;
+    s.setPlane(V(0, 1, 0), V(0, 0, 1), V(1, 0, 0));   // side view
+    s.rotateAboutAxis(2, 90.0);                        // about its own normal
+    expectVec(s.getPlaneU(), 0, 0, 1);
+    expectVec(s.getPlaneV(), 0, -1, 0);
+    expectVec(s.getPlaneNormal(), 1, 0, 0);            // the axis itself stays
+}
+
+TEST(Solver, RotateAboutKeepsTheFrameOrthonormal)
+{
+    AxisFlowSolver s;
+    s.rotateAboutAxis(1, 37.0);   // an arbitrary angle, not just 90
+    const Base::Vector3d u = s.getPlaneU();
+    const Base::Vector3d v = s.getPlaneV();
+    const Base::Vector3d n = s.getPlaneNormal();
+    EXPECT_NEAR(u.Length(), 1.0, kEps);
+    EXPECT_NEAR(v.Length(), 1.0, kEps);
+    EXPECT_NEAR(n.Length(), 1.0, kEps);
+    EXPECT_NEAR(u.Dot(v), 0.0, kEps);
+    EXPECT_NEAR(u.Dot(n), 0.0, kEps);
+    EXPECT_NEAR(v.Dot(n), 0.0, kEps);
+    expectVec(u.Cross(v), n.x, n.y, n.z);   // still right-handed
+}
+
+TEST(Solver, RotateAboutIgnoresAnInvalidAxis)
+{
+    AxisFlowSolver s;
+    s.rotateAboutAxis(7, 90.0);
+    expectVec(s.getPlaneU(), 1, 0, 0);
+    expectVec(s.getPlaneV(), 0, 1, 0);
+    expectVec(s.getPlaneNormal(), 0, 0, 1);
+}
+
+TEST(Solver, RotateAboutMovesThePointWithTheFrame)
+{
+    // The whole reason the action exists: the cursor offset is re-read in the
+    // new frame, so a point 5 along Y lands 5 along Z after R X.
+    AxisFlowSolver s;
+    s.setOrigin(V(0, 0, 0));
+    s.setRawPoint(V(0, 5, 0));
+    expectVec(s.getLocalOffset(), 0, 5, 0);
+    s.rotateAboutAxis(0, 90.0);
+    expectVec(s.getLocalOffset(), 0, 0, -5);
+}

@@ -34,18 +34,62 @@ void AxisFlowService::loadHotkeysFromSettings()
     _hotkeysLoaded = true;
 }
 
-void AxisFlowService::setHotkeys(AxisAction a, const std::vector<int>& keys, bool persist)
+bool AxisFlowService::setHotkeys(AxisAction a, const std::vector<KeyChord>& keys, bool persist)
 {
     if (a == AxisAction::None)
-        return;
+        return false;
 
     // bind() drops the action's previous keys first, so this is a replace.
-    // Assigning a key that another action owns moves it: the map is key -> action.
-    _hotkeys.bind(a, keys);
+    // Assigning a key that another action owns moves it: the map is key ->
+    // action. It refuses outright when the result would break the prefix rule
+    // (a key cannot be both a single binding and the start of a chord).
+    if (!_hotkeys.bind(a, keys))
+        return false;
 
     if (persist)
         AxisFlowSettings::instance().saveHotkeys(_hotkeys);
     Q_EMIT stateChanged();
+    return true;
+}
+
+void AxisFlowService::setHotkeyChord(KeyChord c, AxisAction a, bool persist)
+{
+    if (a == AxisAction::None) {
+        _hotkeys.remove(c);
+    }
+    else if (!_hotkeys.bind(a, { c })) {
+        return;   // prefix-rule violation: leave the map untouched
+    }
+    if (persist)
+        AxisFlowSettings::instance().saveHotkeys(_hotkeys);
+    Q_EMIT stateChanged();
+}
+
+// ---------------------------------------------------------------------------
+// Chord state
+// ---------------------------------------------------------------------------
+
+void AxisFlowService::setPendingPrefix(int qtKey)
+{
+    if (_pendingPrefix == qtKey)
+        return;
+    _pendingPrefix = qtKey;
+    Q_EMIT stateChanged();   // the panel shows the available second keys
+}
+
+void AxisFlowService::clearPendingPrefix()
+{
+    if (_pendingPrefix == 0)
+        return;
+    _pendingPrefix = 0;
+    Q_EMIT stateChanged();
+}
+
+std::vector<std::pair<int, AxisAction>> AxisFlowService::pendingOptions() const
+{
+    if (_pendingPrefix == 0)
+        return {};
+    return _hotkeys.continuations(_pendingPrefix);
 }
 
 void AxisFlowService::resetHotkeys()
@@ -76,14 +120,15 @@ void AxisFlowService::setHotkey(int qtKey, AxisAction a, bool persist)
 {
     if (a == AxisAction::None) {
         // Unbind just this key.
-        _hotkeys.remove(qtKey);
+        _hotkeys.remove(KeyChord{qtKey, 0});
     }
     else {
         // Rebind the action to exactly this key. Replacing (not adding) is what
         // keeps the live map in step with the settings, which store one key list
         // per action: otherwise 'S -> SmartLock' would leave Return/Enter live
         // but unsaved.
-        _hotkeys.bind(a, { qtKey });
+        if (!_hotkeys.bind(a, { KeyChord{qtKey, 0} }))
+            return;   // would break the prefix rule
     }
 
     if (persist)
@@ -200,6 +245,22 @@ void AxisFlowService::performAction(AxisAction a)
     case AxisAction::RotateByView:
         Q_EMIT alignToViewRequested();
         break;
+    // Turn the compass 90 deg about one of its OWN axes (chords R X / R Y /
+    // R Z). Unlike RotateTop/Front/Side these are relative: they work from
+    // wherever the compass currently is, which is the point of AccuDraw's
+    // rotate-about keys.
+    case AxisAction::RotateAboutX:
+        _solver.rotateAboutAxis(0, 90.0);
+        Q_EMIT stateChanged();
+        break;
+    case AxisAction::RotateAboutY:
+        _solver.rotateAboutAxis(1, 90.0);
+        Q_EMIT stateChanged();
+        break;
+    case AxisAction::RotateAboutZ:
+        _solver.rotateAboutAxis(2, 90.0);
+        Q_EMIT stateChanged();
+        break;
     case AxisAction::RotateCycle:
         // Top -> Front -> Side -> Top...; each explicit Rotate* re-seeds the
         // cycle so E always continues from what the user sees.
@@ -215,6 +276,7 @@ void AxisFlowService::performAction(AxisAction a)
     case AxisAction::CancelEntry: clearKeyValues(); clearLocks(); break;
     case AxisAction::CancelCommand: Q_EMIT cancelRequested(); break;
     case AxisAction::FinishLine:    Q_EMIT finishRequested(); break;
+    case AxisAction::ToggleSegmentMode: Q_EMIT segmentModeRequested(); break;
     case AxisAction::ConfirmPoint:  Q_EMIT confirmRequested(); break;
     default: break;
     }
@@ -225,6 +287,7 @@ void AxisFlowService::performAction(AxisAction a)
 
 void AxisFlowService::confirm(const Base::Vector3d& worldPt)
 {
+    clearPendingPrefix();   // a placed point ends any half-typed chord
     // "Compass follows direction": rotate BEFORE the origin moves, using the
     // segment from the previous reference point to the point being confirmed.
     // 1 = keep the normal (in-plane), 2 = full. Gated on _hasFollowRef so the
@@ -484,6 +547,11 @@ bool AxisFlowService::hasKeyValue(int field) const
     case 2: return _solver.hasValueZ();
     default: return false;
     }
+}
+
+bool AxisFlowService::anyFieldFixed() const
+{
+    return hasKeyValue(0) || hasKeyValue(1) || hasKeyValue(2);
 }
 
 double AxisFlowService::keyValue(int field) const

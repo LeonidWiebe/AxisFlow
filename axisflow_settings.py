@@ -62,6 +62,11 @@ _VIEW_ACTIONS = [
     ("RotateSide",    QT_TRANSLATE_NOOP("AxisFlow", "Side (compass Z along global +X)")),
     ("RotateByView",  QT_TRANSLATE_NOOP("AxisFlow", "Align the compass with the current view")),
     ("RotateCycle",   QT_TRANSLATE_NOOP("AxisFlow", "Cycle Top / Front / Side")),
+    ("RotateAboutX",  QT_TRANSLATE_NOOP("AxisFlow", "Turn 90 deg about the compass X")),
+    ("RotateAboutY",  QT_TRANSLATE_NOOP("AxisFlow", "Turn 90 deg about the compass Y")),
+    ("RotateAboutZ",  QT_TRANSLATE_NOOP("AxisFlow", "Turn 90 deg about the compass Z")),
+    ("ToggleSegmentMode",
+        QT_TRANSLATE_NOOP("AxisFlow", "Toggle segment: line / arc (line command)")),
 ]
 _ACTIONS = _CONTROL_ACTIONS + _VIEW_ACTIONS
 # Bindable through the API / hotkeys.ini but not shown in the dialog (keeps the
@@ -73,16 +78,24 @@ _HIDDEN_ACTION_LABELS = {
 }
 
 
+def _key_name(code):
+    """16777220 -> 'Return'. PortableText on purpose: these are the names Qt
+    also parses, so a name shown here can be typed straight into hotkeys.ini."""
+    name = QtGui.QKeySequence(int(code)).toString(QtGui.QKeySequence.PortableText)
+    return name if name else "0x%X" % int(code)
+
+
 def _keys_text(codes):
-    """[16777220, 16777221] -> 'Return, Enter'; [] -> 'not assigned'."""
+    """[16777220, 16777221] -> 'Return, Enter'; [[82, 88]] -> 'R X' (a two-key
+    chord); [] -> 'not assigned'."""
     if not codes:
         return translate("AxisFlow", "not assigned")
     names = []
     for c in codes:
-        # PortableText on purpose: these are the names Qt also parses, so a
-        # name shown here can be typed straight into hotkeys.ini.
-        name = QtGui.QKeySequence(int(c)).toString(QtGui.QKeySequence.PortableText)
-        names.append(name if name else "0x%X" % int(c))
+        if isinstance(c, (list, tuple)):
+            names.append(" ".join(_key_name(k) for k in c if k))
+        else:
+            names.append(_key_name(c))
     return ", ".join(names)
 
 
@@ -100,6 +113,7 @@ class _KeyButton(QtWidgets.QPushButton):
         self._on_capture = on_capture
         self._listening = False
         self._codes = []
+        self._chord_first = None      # first key of a chord being captured
         self.setFocusPolicy(QtCore.Qt.StrongFocus)
         self.clicked.connect(self._toggle_listen)
 
@@ -113,10 +127,12 @@ class _KeyButton(QtWidgets.QPushButton):
             self._stop()
         else:
             self._listening = True
-            self.setText(translate("AxisFlow", "Press a key..."))
+            self._chord_first = None
+            self.setText(translate("AxisFlow", "Press a key (hold Shift for a two-key chord)..."))
 
     def _stop(self):
         self._listening = False
+        self._chord_first = None
         self.setText(_keys_text(getattr(self, "_codes", [])))
 
     def focusOutEvent(self, event):
@@ -142,6 +158,21 @@ class _KeyButton(QtWidgets.QPushButton):
             QtWidgets.QToolTip.showText(
                 self.mapToGlobal(QtCore.QPoint(0, self.height())),
                 translate("AxisFlow", "AxisFlow uses plain keys only, without Ctrl / Alt."), self)
+            return
+
+        # Second key of a chord: the first was captured with Shift held.
+        if self._chord_first is not None:
+            first, self._chord_first = self._chord_first, None
+            self._listening = False
+            self._on_capture(self._action, [first, int(key)])
+            return
+
+        # Shift held on the FIRST key means "this opens a chord": keep
+        # listening for the key that completes it. Chords are two keys, so the
+        # next press always finishes the capture.
+        if mods & QtCore.Qt.ShiftModifier:
+            self._chord_first = int(key)
+            self.setText(translate("AxisFlow", "{key} then...").format(key=_key_name(key)))
             return
 
         self._listening = False
@@ -176,6 +207,11 @@ _SECTIONS = [
              QT_TRANSLATE_NOOP("AxisFlow", "Dotted"), QT_TRANSLATE_NOOP("AxisFlow", "Dash-dot")]),
         ("liveLineColor",     QT_TRANSLATE_NOOP("AxisFlow", "Live line colour"),      "color", None),
         ("liveLineTransparency", QT_TRANSLATE_NOOP("AxisFlow", "Live line transparency"), "float", (0.0, 1.0, 0.05, 2)),
+        ("compassPathEnabled", QT_TRANSLATE_NOOP("AxisFlow", "Draw path to the point"), "bool", None),
+        ("compassPathStyle",  QT_TRANSLATE_NOOP("AxisFlow", "Path style"),            "enum",
+            [QT_TRANSLATE_NOOP("AxisFlow", "Solid"), QT_TRANSLATE_NOOP("AxisFlow", "Dashed"),
+             QT_TRANSLATE_NOOP("AxisFlow", "Dotted"), QT_TRANSLATE_NOOP("AxisFlow", "Dash-dot")]),
+        ("compassPathColor",  QT_TRANSLATE_NOOP("AxisFlow", "Path colour"),           "color", None),
         ("useDistanceIndexing", QT_TRANSLATE_NOOP("AxisFlow", "Use distance indexing"), "bool", None),
         ("useAxesIndexing",     QT_TRANSLATE_NOOP("AxisFlow", "Use axes indexing"),   "bool",  None),
         ("indexingTolerance",   QT_TRANSLATE_NOOP("AxisFlow", "Indexing tolerance (px)"), "int", (0, 50, 1)),
@@ -252,8 +288,8 @@ class AxisFlowSettingsDialog(QtWidgets.QDialog):
         # A QListWidget + QStackedWidget gives left-hand tabs whose labels stay
         # horizontal -- a QTabWidget in the "West" position rotates them.
         self._nav = QtWidgets.QListWidget()
-        self._nav.setFixedWidth(104)
         self._nav.setFocusPolicy(QtCore.Qt.NoFocus)
+        self._nav.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
         self._stack = QtWidgets.QStackedWidget()
 
         self._updating = True
@@ -270,6 +306,17 @@ class AxisFlowSettingsDialog(QtWidgets.QDialog):
                 grid.addWidget(widget, r, 1)
                 self._editors[key] = (typ, widget)
             grid.setRowStretch(len(rows), 1)   # keep rows top-aligned
+
+            # Per-section restore: writes back the factory defaults of THIS
+            # section only, so tuning the compass never resets your hotkeys or
+            # your indexing tolerances.
+            restore = QtWidgets.QPushButton(translate("AxisFlow", "Restore defaults"))
+            restore.setToolTip(
+                translate("AxisFlow", "Restores the default values of this section only"))
+            restore.clicked.connect(
+                lambda _checked=False, rr=rows: self._reset_section(rr))
+            grid.addWidget(restore, len(rows) + 1, 0, 1, 2, QtCore.Qt.AlignLeft)
+
             self._stack.addWidget(page)
             self._nav.addItem(_tr(title))
 
@@ -279,9 +326,14 @@ class AxisFlowSettingsDialog(QtWidgets.QDialog):
         self._keybuttons = {}          # action -> _KeyButton
         self._stack.addWidget(self._build_hotkeys_page(_CONTROL_ACTIONS, with_reset=True))
         self._nav.addItem(translate("AxisFlow", "Control hotkeys"))
-        self._stack.addWidget(self._build_hotkeys_page(_VIEW_ACTIONS, with_reset=False))
+        self._stack.addWidget(self._build_hotkeys_page(_VIEW_ACTIONS, with_reset=True))
         self._nav.addItem(translate("AxisFlow", "View hotkeys"))
         self._updating = False
+
+        # Width from the longest item rather than a fixed number of pixels: the
+        # labels are translated, and the Russian ones did not fit in the old
+        # fixed 104 px.
+        self._nav.setFixedWidth(self._nav_width())
 
         self._nav.currentRowChanged.connect(self._stack.setCurrentIndex)
         self._nav.setCurrentRow(0)
@@ -352,31 +404,70 @@ class AxisFlowSettingsDialog(QtWidgets.QDialog):
             btn.set_codes(hk.get(action, []))
 
     def _on_key_captured(self, action, code):
+        """code is an int (single key) or [first, second] (a two-key chord)."""
         if AF is None:
             return
         hk = AF.getSettings().get("hotkeys", {})
+        chord = list(code) if isinstance(code, (list, tuple)) else None
+        first = chord[0] if chord else int(code)
+
+        def as_list(v):
+            return [list(x) if isinstance(x, (list, tuple)) else x for x in (v or [])]
 
         # Already this action's only key? Nothing to do.
-        if list(hk.get(action, [])) == [code]:
+        if as_list(hk.get(action, [])) == [chord if chord else int(code)]:
             self._reload_hotkeys()
             return
 
-        # The map is key -> action, so assigning a key that another action owns
+        labels = dict(_ACTIONS)
+        labels.update(_HIDDEN_ACTION_LABELS)
+
+        # The single/chord rule: a key is either a binding of its own or the
+        # first key of a chord, never both. Refuse early with an explanation --
+        # the C++ side would reject it anyway, but silently.
+        clash = None
+        for other, codes in hk.items():
+            if other == action:
+                continue
+            for c in as_list(codes):
+                other_is_chord = isinstance(c, list)
+                other_first = c[0] if other_is_chord else c
+                if other_first != first:
+                    continue
+                if bool(chord) != other_is_chord:
+                    clash = (other, c)
+                    break
+            if clash:
+                break
+        if clash is not None:
+            other, c = clash
+            QtWidgets.QMessageBox.warning(
+                self, translate("AxisFlow", "Key cannot be used"),
+                translate("AxisFlow",
+                    "{key} is already the {kind} used by \"{action}\".\n\n"
+                    "A key is either a binding of its own or the first key of a "
+                    "two-key chord, never both.")
+                .format(key=_key_name(first),
+                        kind=(translate("AxisFlow", "start of a chord") if isinstance(c, list)
+                              else translate("AxisFlow", "single key")),
+                        action=_tr(labels.get(other, other))))
+            self._reload_hotkeys()
+            return
+
+        # The map is key -> action, so assigning a binding another action owns
         # takes it away from that action. Say so instead of doing it silently.
+        target = chord if chord else int(code)
         owner = None
         for other, codes in hk.items():
-            if other != action and code in list(codes):
+            if other != action and target in as_list(codes):
                 owner = other
                 break
         if owner is not None:
-            labels = dict(_ACTIONS)
-            labels.update(_HIDDEN_ACTION_LABELS)
-            label = labels.get(owner, owner)
             answer = QtWidgets.QMessageBox.question(
                 self, translate("AxisFlow", "Key already used"),
                 translate("AxisFlow", "{key} is currently assigned to \"{action}\".\n\n"
                     "Reassign it? That action will be left without a key.")
-                .format(key=_keys_text([code]), action=_tr(label)),
+                .format(key=_keys_text([target]), action=_tr(labels.get(owner, owner))),
                 QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No,
                 QtWidgets.QMessageBox.No)
             if answer != QtWidgets.QMessageBox.Yes:
@@ -384,9 +475,12 @@ class AxisFlowSettingsDialog(QtWidgets.QDialog):
                 return
 
         try:
-            AF.setHotkeys(action, [code])
-        except Exception as exc:      # pragma: no cover
-            App.Console.PrintError("AxisFlow: could not set hotkey: {0}\n".format(exc))
+            AF.setHotkeys(action, [target])
+        except Exception as exc:
+            # Includes the single/chord rule refused C++-side (a case the check
+            # above cannot see, e.g. a binding made through hotkeys.ini).
+            QtWidgets.QMessageBox.warning(
+                self, translate("AxisFlow", "Key cannot be used"), str(exc))
         self._reload_hotkeys()
 
     def _clear_hotkey(self, action):
@@ -397,6 +491,31 @@ class AxisFlowSettingsDialog(QtWidgets.QDialog):
         except Exception as exc:      # pragma: no cover
             App.Console.PrintError("AxisFlow: could not clear hotkey: {0}\n".format(exc))
         self._reload_hotkeys()
+
+    def _nav_width(self):
+        """Widest item plus the frame and a little air, floored at the old 104
+        px so a short-labelled language does not give a cramped strip."""
+        w = self._nav.sizeHintForColumn(0)
+        w += 2 * self._nav.frameWidth() + 12
+        return max(104, w)
+
+    def _reset_section(self, rows):
+        """Write the factory defaults of one section back, live."""
+        if AF is None:
+            return
+        try:
+            defaults = AF.getDefaultSettings()
+        except Exception as exc:
+            App.Console.PrintError(
+                "axisflow_settings: cannot read defaults: {0}\n".format(exc))
+            return
+        for row in rows:
+            key = row[0]
+            if key in defaults:
+                # _set() is the same path a manual edit takes, so the compass
+                # and panel update as each value lands.
+                self._set(key, defaults[key])
+        self.reload()
 
     def _reset_hotkeys(self):
         if AF is None:

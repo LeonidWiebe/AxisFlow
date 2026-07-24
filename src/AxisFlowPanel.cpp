@@ -5,6 +5,7 @@
 #include "AxisFlowSettings.h"
 #include "AxisFlowHotkeys.h"
 #include "AxisFlowEntry.h"
+#include "AxisFlowKeyContext.h"
 
 #include <Gui/MainWindow.h>
 
@@ -17,8 +18,14 @@
 #include <QtCore/QSignalBlocker>
 #include <QtGui/QRegularExpressionValidator>
 #include <QtGui/QCloseEvent>
+#include <QtGui/QHideEvent>
+#include <QtGui/QMoveEvent>
 #include <QtGui/QFont>
+#include <QtGui/QKeySequence>
+#include <QtGui/QScreen>
+#include <QtGui/QPalette>
 #include <QtGui/QMouseEvent>
+#include <QtWidgets/QFrame>
 #include <QtWidgets/QStyle>
 
 #include <cmath>
@@ -116,6 +123,31 @@ void AxisFlowPanel::buildUi()
     mainLayout->addLayout(rowB);
     mainLayout->addLayout(rowC);
     mainLayout->addWidget(_frameBtn);
+
+    // Chord hint: a SEPARATE little window parked beside the panel, shown only
+    // while a two-key chord waits for its second key. Deliberately not a row in
+    // the layout -- that changed the panel's minimum size and made it resize
+    // (and the window manager complain) every time a prefix was pressed.
+    // WA_ShowWithoutActivating + WindowDoesNotAcceptFocus are essential: the
+    // caret must stay in the active coordinate field, or the next key would be
+    // resolved as a global FreeCAD shortcut.
+    _chordHint = new QLabel(this, Qt::Tool | Qt::FramelessWindowHint
+                                  | Qt::WindowDoesNotAcceptFocus);
+    _chordHint->setAttribute(Qt::WA_ShowWithoutActivating);
+    _chordHint->setFocusPolicy(Qt::NoFocus);
+    _chordHint->setFrameShape(QFrame::StyledPanel);
+    _chordHint->setMargin(6);
+    _chordHint->setAutoFillBackground(true);
+    // Borrow the tool-tip colours so it reads as a transient hint whatever the
+    // user's theme is.
+    QPalette hintPal = _chordHint->palette();
+    hintPal.setColor(QPalette::Window,     hintPal.color(QPalette::ToolTipBase));
+    hintPal.setColor(QPalette::WindowText, hintPal.color(QPalette::ToolTipText));
+    _chordHint->setPalette(hintPal);
+    QFont hf = _chordHint->font();
+    hf.setBold(true);
+    _chordHint->setFont(hf);
+    _chordHint->hide();
 }
 
 void AxisFlowPanel::wireToService()
@@ -246,6 +278,87 @@ void AxisFlowPanel::updateFrameButton()
     if (_frameBtn)
         _frameBtn->setText(_worldFrame ? tr("World")
                                        : tr("Local"));
+}
+
+QString AxisFlowPanel::actionLabel(AxisAction a)
+{
+    // Only the actions that can sensibly sit behind a chord need a friendly
+    // name here; anything else falls back to its canonical name, which is what
+    // hotkeys.ini and the settings dialog show too.
+    switch (a) {
+    case AxisAction::RotateAboutX: return tr("about X");
+    case AxisAction::RotateAboutY: return tr("about Y");
+    case AxisAction::RotateAboutZ: return tr("about Z");
+    default: return QString::fromLatin1(Hotkeys::name(a));
+    }
+}
+
+void AxisFlowPanel::updateChordHint()
+{
+    if (!_chordHint)
+        return;
+
+    AxisFlowService& s = AxisFlowService::instance();
+    const int prefix = s.pendingPrefix();
+    if (prefix == 0) {
+        _chordHint->hide();
+        return;
+    }
+
+    // The prefix on its own line, then one option per line:
+    //
+    //     R ->
+    //     X about X
+    //     Y about Y
+    //     Z about Z
+    //
+    // A list scans faster vertically than a run-on line, and the window is free
+    // to grow downwards -- it is not part of the panel's layout.
+    const QString arrow = QString(QChar(0x2192));   // -> , encoding-safe
+    QStringList parts;
+    for (const auto& opt : s.pendingOptions()) {
+        const QString keyName =
+            QKeySequence(opt.first).toString(QKeySequence::PortableText);
+        parts << QStringLiteral("%1 %2").arg(keyName, actionLabel(opt.second));
+    }
+
+    const QString prefixName =
+        QKeySequence(prefix).toString(QKeySequence::PortableText);
+    _chordHint->setText(QStringLiteral("%1 %2\n%3")
+                            .arg(prefixName, arrow, parts.join(QLatin1Char('\n'))));
+
+    positionChordHint();
+    _chordHint->show();       // never raise()/activateWindow(): that would move
+                              // the caret out of the coordinate field
+}
+
+void AxisFlowPanel::positionChordHint()
+{
+    if (!_chordHint)
+        return;
+
+    _chordHint->adjustSize();   // its own window, so this cannot disturb the panel
+
+    const QRect panelRect = frameGeometry();
+    const int   gap = 6;
+    const QSize hint = _chordHint->size();
+
+    QPoint pos(panelRect.right() + gap, panelRect.top());
+
+    // Flip to the left edge when there is no room on the right, and keep the
+    // whole thing on the screen the panel lives on.
+    if (const QScreen* sc = screen()) {
+        const QRect avail = sc->availableGeometry();
+        if (pos.x() + hint.width() > avail.right())
+            pos.setX(panelRect.left() - hint.width() - gap);
+        if (pos.x() < avail.left())
+            pos.setX(avail.left());
+        if (pos.y() + hint.height() > avail.bottom())
+            pos.setY(avail.bottom() - hint.height());
+        if (pos.y() < avail.top())
+            pos.setY(avail.top());
+    }
+    _chordHint->move(pos);
 }
 
 void AxisFlowPanel::setLockState()
@@ -612,33 +725,6 @@ void AxisFlowPanel::cancelInput()
     focusActiveField();
 }
 
-bool AxisFlowPanel::isEntryStartKey(const QKeyEvent* ke)
-{
-    const QString t = ke->text();
-    if (t.isEmpty()) return false;
-    const QChar c = t.at(0);
-    return c.isDigit() || c == QLatin1Char('.') || c == QLatin1Char(',')
-                       || c == QLatin1Char('-') || c == QLatin1Char('+');
-}
-
-bool AxisFlowPanel::isValueKey(const QKeyEvent* ke)
-{
-    switch (ke->key()) {
-    case Qt::Key_0: case Qt::Key_1: case Qt::Key_2: case Qt::Key_3:
-    case Qt::Key_4: case Qt::Key_5: case Qt::Key_6: case Qt::Key_7:
-    case Qt::Key_8: case Qt::Key_9:
-    case Qt::Key_Period: case Qt::Key_Comma:
-    case Qt::Key_Minus:  case Qt::Key_Plus:
-    case Qt::Key_Backspace: case Qt::Key_Delete:
-    case Qt::Key_Left: case Qt::Key_Right: case Qt::Key_Home: case Qt::Key_End:
-        return true;
-    default:
-        // Letters are unit suffixes ("m", "ft", "deg") when they follow digits;
-        // on an empty field they are free to act as action keys.
-        return false;
-    }
-}
-
 bool AxisFlowPanel::eventFilter(QObject* obj, QEvent* ev)
 {
     // Drag the frameless window by its title label.
@@ -671,65 +757,100 @@ bool AxisFlowPanel::eventFilter(QObject* obj, QEvent* ev)
         return QWidget::eventFilter(obj, ev);
     }
 
-    // Action keys must fire even while a value field has focus.
+    // Delete / Backspace with nothing being typed have to reach FreeCAD, so
+    // that Del still deletes the selected object while the compass is on.
+    //
+    // Qt offers the key to the focused widget first, as a ShortcutOverride, and
+    // QLineEdit ACCEPTS that for editing keys -- which is what swallowed Del:
+    // the shortcut was suppressed and the key went into the read-out instead.
+    // Blocking the override here without accepting it leaves the event
+    // unclaimed, so Qt goes on to resolve the shortcut.
+    if (ev->type() == QEvent::ShortcutOverride &&
+        (obj == _editA || obj == _editB || obj == _editC)) {
+        auto* ke = static_cast<QKeyEvent*>(ev);
+        const bool eraser = (ke->key() == Qt::Key_Delete ||
+                             ke->key() == Qt::Key_Backspace);
+        if (eraser && !entryInProgress())
+            return true;                 // deliberately NOT accepted
+        return QWidget::eventFilter(obj, ev);
+    }
+
+    // Action keys must fire even while a value field has focus. The decision of
+    // what a key means lives in AxisFlowKeyRouting.h (Tier-1 tested); this only
+    // executes the verdict.
     if (ev->type() == QEvent::KeyPress &&
         (obj == _editA || obj == _editB || obj == _editC)) {
         auto* ke = static_cast<QKeyEvent*>(ev);
+        QLineEdit* edit = qobject_cast<QLineEdit*>(obj);
+        const int idx = (edit == _editB) ? 1 : (edit == _editC ? 2 : 0);
 
-        if (ke->key() == Qt::Key_Tab || ke->key() == Qt::Key_Backtab) {
-            cycleActiveField();
-            return true;   // never let Qt walk the focus chain
-        }
-
-        // The caret lives in the active field, which shows the live read-out.
-        // The FIRST typed character must replace that read-out, not be appended.
-        // "Fresh" means the digit lands in a DIFFERENT field than the one being
-        // typed -- including after Tab, where _entryField still points at the
-        // previous field (that was the bug: the new field kept its dynamic value
-        // and the digit appended, e.g. Z became "0.00005").
-        if (isEntryStartKey(ke)) {
-            QLineEdit* edit = qobject_cast<QLineEdit*>(obj);
-            const int idx = (edit == _editB) ? 1 : (edit == _editC ? 2 : 0);
-            if (_entryField != idx) {
-                _entryField = idx;
-                edit->clear();               // replace the read-out
-            }
-            return QWidget::eventFilter(obj, ev);   // let QLineEdit insert the char
-        }
-
-        if (ke->key() == Qt::Key_Return || ke->key() == Qt::Key_Enter) {
-            // Enter commits the point (whatever the keymap binds to it), rather
-            // than being eaten by the line edit. Typed values are already live
-            // overrides on the solver, so the solved point includes them.
-            AxisFlowService& sv = AxisFlowService::instance();
-            sv.performAction(sv.actionForKey(ke->key()));
-            return true;
-        }
-        if (isValueKey(ke))
-            return QWidget::eventFilter(obj, ev);
-
-        // Bound keys always act, even mid-entry: after typing "1500" the X key
-        // must still lock the X axis. Letters cannot be typed into the field
-        // anyway (validator), so there is no ambiguity with unit suffixes.
         AxisFlowService& s = AxisFlowService::instance();
-        AxisAction a = s.actionForKey(ke->key());
-        if (a == AxisAction::CancelEntry) {
+        KeyContext ctx = keyContextFromEvent(ke, /*inField*/ true, _ownsInput);
+        // Only the panel knows which field is mid-entry. "Fresh" means the
+        // character lands in a DIFFERENT field than the one being typed --
+        // including after Tab, where _entryField still points at the previous
+        // field (that was the bug: the new field kept its dynamic value and the
+        // digit appended, e.g. Z became "0.00005").
+        ctx.sameEntryField = (_entryField == idx);
+
+        const KeyRoute route = routeKey(ctx);
+        applyChordState(ke, route);   // start / end the two-key chord wait
+
+        switch (route) {
+        case KeyRoute::BeginChord:
+        case KeyRoute::ChordHold:
+            return true;                            // waiting for the second key
+        case KeyRoute::TabCycle:
+            cycleActiveField();
+            return true;                            // never walk Qt's focus chain
+        case KeyRoute::BeginEntry:
+            _entryField = idx;
+            edit->clear();                          // replace the live read-out
+            return QWidget::eventFilter(obj, ev);   // QLineEdit inserts the char
+        case KeyRoute::PassToWidget:
+            return QWidget::eventFilter(obj, ev);
+        case KeyRoute::CancelEntry:
             cancelInput();
             return true;
-        }
-        if (a != AxisAction::None) {
-            s.performAction(a);
+        case KeyRoute::Action:
+            // Bound keys act even mid-entry: after typing "1500" the X key must
+            // still lock X, and Enter still commits the point instead of being
+            // eaten by the line edit.
+            s.performAction(ctx.bound);
             return true;
-        }
-
-        // Any other letter is meaningless in a coordinate: swallow it rather
-        // than let it flash in the field and be rejected.
-        const QString kt = ke->text();
-        if (!kt.isEmpty() && kt.at(0).isLetter())
+        case KeyRoute::Swallow:
             return true;
+        case KeyRoute::Ignore:
+            // Backspace / Delete handed back above. If FreeCAD had a shortcut
+            // for it, that already ran and this KeyPress never happens; getting
+            // here means nothing is bound, so swallow it rather than let the
+            // line edit chew a character out of the read-out.
+            if (ctx.backspace || ctx.del)
+                return true;
+            break;
+        default:
+            break;
+        }
     }
 
     return QWidget::eventFilter(obj, ev);
+}
+
+void AxisFlowPanel::moveEvent(QMoveEvent* e)
+{
+    // Dragging the panel by its title bar must take the hint along.
+    if (_chordHint && _chordHint->isVisible())
+        positionChordHint();
+    QWidget::moveEvent(e);
+}
+
+void AxisFlowPanel::hideEvent(QHideEvent* e)
+{
+    // The hint is a top-level window of its own: hiding the panel (AxisFlow
+    // switched off, session torn down) has to take it off screen too.
+    if (_chordHint)
+        _chordHint->hide();
+    QWidget::hideEvent(e);
 }
 
 void AxisFlowPanel::closeEvent(QCloseEvent* e)
@@ -743,17 +864,28 @@ void AxisFlowPanel::closeEvent(QCloseEvent* e)
 
 void AxisFlowPanel::keyPressEvent(QKeyEvent* e)
 {
-    if (e->key() == Qt::Key_Tab) {
-        cycleActiveField();
-        return;
-    }
-
+    // Same policy as the field filter, minus the in-field cases: this is the
+    // panel window itself, so no coordinate field has the key.
     AxisFlowService& s = AxisFlowService::instance();
-    AxisAction a = s.actionForKey(e->key());
-    if (a == AxisAction::CancelEntry) { cancelInput(); return; }
-    if (a != AxisAction::None) {
-        s.performAction(a);
-        return;
+    const KeyContext ctx = keyContextFromEvent(e, /*inField*/ false, _ownsInput);
+
+    const KeyRoute route = routeKey(ctx);
+    applyChordState(e, route);
+
+    switch (route) {
+    case KeyRoute::BeginChord:
+    case KeyRoute::ChordHold:   return;             // waiting for the second key
+    case KeyRoute::TabCycle:    cycleActiveField();      return;
+    case KeyRoute::CancelEntry: cancelInput();           return;
+    case KeyRoute::Action:      s.performAction(ctx.bound); return;
+    case KeyRoute::Backspace:   backspaceEntry();        return;
+    case KeyRoute::ClearEntry:  clearEntry();            return;
+    case KeyRoute::StartTyping:
+        if (!e->text().isEmpty() && startTyping(e->text().at(0)))
+            return;
+        break;
+    case KeyRoute::Swallow:     return;
+    default:                    break;
     }
 
     QWidget::keyPressEvent(e);
@@ -766,6 +898,7 @@ void AxisFlowPanel::onServiceState()
     AxisFlowService& s = AxisFlowService::instance();
     setMode(s.mode() == CompassMode::Polar);
     setLockState();
+    updateChordHint();
 
     // A field frozen by a lock must immediately SHOW the captured value
     // (SmartLock freezes Y/Z at 0 while the read-out still shows the cursor).

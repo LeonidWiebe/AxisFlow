@@ -65,6 +65,29 @@ void AxisFlowSolver::rotateToDirection(const Base::Vector3d& worldDir, bool keep
     setPlane(u1, v1, n1);
 }
 
+void AxisFlowSolver::rotateAboutAxis(int axis, double deg)
+{
+    if (axis < 0 || axis > 2)
+        return;
+
+    const Base::Vector3d u = getPlaneU();
+    const Base::Vector3d v = getPlaneV();
+    const Base::Vector3d n = getPlaneNormal();
+    const Base::Vector3d k = (axis == 0) ? u : (axis == 1) ? v : n;
+
+    const double rad = deg * M_PI / 180.0;
+    const double c = std::cos(rad), sn = std::sin(rad);
+
+    // Rodrigues. Applied to all three basis vectors: the axis itself comes back
+    // unchanged (k x k = 0 and k.k = 1), so the frame stays orthonormal and
+    // right-handed without any special-casing.
+    auto rot = [&](const Base::Vector3d& p) {
+        return p * c + k.Cross(p) * sn + k * (k.Dot(p) * (1.0 - c));
+    };
+
+    setPlane(rot(u), rot(v), rot(n));
+}
+
 void AxisFlowSolver::setMode(CompassMode mode)
 {
     _mode = mode;
@@ -243,7 +266,20 @@ IndexingResult AxisFlowSolver::indexing() const
     in.useDistance     = _useDistIdx;
     in.useAxis         = _useAxisIdx;
     in.localFrame      = _localFrame;
-    in.axisLocked      = inPlaneLocked();
+    // Per-axis permission instead of one blanket gate: a fixed coordinate may
+    // not be moved by indexing, but the OTHER axis stays available. "Fixed"
+    // covers a typed value as well as a lock -- indexing must not overwrite a
+    // number the user typed either.
+    if (_mode == CompassMode::Rectangular) {
+        in.fixedU = hasValueX();
+        in.fixedV = hasValueY();
+    }
+    else {
+        // Radial: a projection onto an axis changes both the distance and the
+        // angle, so either one being fixed rules axis indexing out entirely.
+        in.blockAxisIndexing = hasValueDist() || hasValueAngle();
+    }
+    in.fixedN = hasValueZ();
     // Locks that pin the point ONTO an axis light the candidate axis: SmartLock
     // freezes at exactly 0, so the comparison is exact on purpose (a field
     // frozen at a non-zero value rides a PARALLEL line, not the axis -- the

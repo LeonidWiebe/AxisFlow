@@ -75,6 +75,40 @@ public:
      *  pattern are inherited from the live line via applySettings()). */
     void applyCandidateAxisStyle(int weightPx, double transparency);
 
+    /**
+     * Compass path: the dashed breakdown of how the prospective click point
+     * (PCP -- the point that would be placed right now, locks and all) is
+     * reached from the compass centre, continuing to the snap point when the
+     * two differ. Shown while an object snap is live or any coordinate field
+     * is frozen, i.e. exactly when the point is no longer simply "under the
+     * cursor" and the reading benefits from being spelled out.
+     *
+     * The shape depends on which in-plane fields are frozen (@p lockU, @p
+     * lockV -- the panel's check boxes):
+     *
+     *   nothing frozen   centre -> PCP projected on the plane -> PCP
+     *   U frozen         centre -> (u, 0) along U -> plane projection -> PCP
+     *   V frozen         centre -> (0, v) along V -> plane projection -> PCP
+     *   both frozen      centre -> (u, 0) -> (u, v) -> PCP
+     *
+     * A frozen normal component (Z) does not change the shape, it only fixes
+     * the length of the last leg. When the snap point differs from the PCP --
+     * which happens exactly when a lock overrides part of the snapped point --
+     * one more leg runs from the PCP to it.
+     *
+     * The path does NOT replace the candidate-axis line: that one is
+     * axis-indexing feedback ("you are riding this axis") and stays visible
+     * whenever indexing fires. The two answer different questions.
+     */
+    void setPathState(bool active, bool lockU, bool lockV,
+                      bool hasSnap, const SbVec3f& snapWorld);
+    bool pathActive() const { return _pathActive; }
+
+    /** Style the compass path: pattern (0 solid,1 dash,2 dot,3 dash-dot) and
+     *  colour 0xRRGGBBAA. The width is deliberately fixed at one pixel -- the
+     *  path is a read-out, not a highlight. */
+    void applyPathStyle(bool enabled, int style, unsigned long rgba);
+
     /** Drive the indexing markers computed by the solver:
      *   distanceActive -> show the candidate point at the live-line end;
      *   axisActive     -> hide the live line and show the candidate-axis line.
@@ -98,6 +132,7 @@ private:
     void build();
     void rebuild();          // contour + axes + dot, from _radius and settings
     void rebuildGuide();     // origin -> cursor, in local space
+    void rebuildPath();      // centre -> in-plane projection -> point
 
     SoSeparator*   _root       { nullptr };
     SoSwitch*      _visSwitch  { nullptr };   // whole compass on/off
@@ -151,6 +186,19 @@ private:
     SoDrawStyle*   _styleAxisCand  { nullptr };
     SoCoordinate3* _coordAxisCand  { nullptr };
     SoLineSet*     _lineAxisCand   { nullptr };
+
+    // Compass path: centre -> (lx,ly,0) -> (lx,ly,lz), one thin dashed polyline.
+    SoSwitch*      _pathSwitch { nullptr };
+    SoMaterial*    _matPath    { nullptr };
+    SoDrawStyle*   _stylePath  { nullptr };
+    SoCoordinate3* _coordPath  { nullptr };
+    SoLineSet*     _linePath   { nullptr };
+    bool           _pathActive  { false };   // snap live / a field frozen
+    bool           _pathEnabled { true };    // from settings
+    bool           _pathLockU   { false };   // in-plane U field frozen
+    bool           _pathLockV   { false };   // in-plane V field frozen
+    bool           _pathHasSnap { false };
+    SbVec3f        _pathSnapWorld { 0, 0, 0 };
 
     // Candidate point: a prominent dot at the live-line end, shown while
     // distance-indexing snaps. Same size as the centre dot.

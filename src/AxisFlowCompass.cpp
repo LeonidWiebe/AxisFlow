@@ -2,6 +2,7 @@
 
 #include "AxisFlowCompass.h"
 #include "AxisFlowSettings.h"
+#include "AxisFlowPath.h"
 #include "AxisFlowSolver.h"   // CompassMode
 
 #include <Inventor/nodes/SoAnnotation.h>
@@ -226,6 +227,27 @@ void AxisFlowCompass::build()
     }
     content->addChild(_axisCandSwitch);
 
+    // ---- compass path (dashed breakdown of where the point really is) ------
+    _pathSwitch = new SoSwitch;
+    _pathSwitch->whichChild.setValue(SO_SWITCH_NONE);
+    {
+        auto* sep = new SoSeparator;
+        _matPath = new SoMaterial;
+        _matPath->diffuseColor.setValue(SbColor(0.78f, 0.78f, 0.78f));
+        _stylePath = new SoDrawStyle;
+        _stylePath->lineWidth.setValue(1.0f);      // thin on purpose: a read-out
+        _stylePath->linePattern.setValue(0xF0F0);  // dashed
+        _coordPath = new SoCoordinate3;
+        _linePath = new SoLineSet;
+        _linePath->numVertices.setValue(0);
+        sep->addChild(_matPath);
+        sep->addChild(_stylePath);
+        sep->addChild(_coordPath);
+        sep->addChild(_linePath);
+        _pathSwitch->addChild(sep);
+    }
+    content->addChild(_pathSwitch);
+
     // ---- candidate point (distance-indexing snap marker at the line end) ----
     _candDotSwitch = new SoSwitch;
     _candDotSwitch->whichChild.setValue(SO_SWITCH_NONE);
@@ -285,6 +307,8 @@ void AxisFlowCompass::applySettings()
         _styleAxisCand->linePattern.setValue(kPat[idx]);
     }
     applyCandidateAxisStyle(s.indexingAxisWeight(), s.indexingAxisTransparency());
+
+    applyPathStyle(s.compassPathEnabled(), s.compassPathStyle(), s.compassPathColor());
 
     // Candidate point matches the centre dot's size.
     if (_candDotStyle)
@@ -362,6 +386,9 @@ void AxisFlowCompass::rebuildGuide()
 
     // Candidate axis: centre -> end. The end is already ON the axis, because
     // getSolvedPoint() perpendicular-projected it there before we got here.
+    // It is the feedback for axis indexing and is ALWAYS shown when indexing
+    // fires -- the compass path does not replace it (they answer different
+    // questions: "you are riding this axis" vs "here is where the point sits").
     if (_axisCandSwitch) {
         if (_axisCandActive) {
             const SbVec3f pts[2] = { SbVec3f(0, 0, 0), _localEnd };
@@ -374,6 +401,9 @@ void AxisFlowCompass::rebuildGuide()
             _axisCandSwitch->whichChild.setValue(SO_SWITCH_NONE);
         }
     }
+
+    // The path ends at the same point, so it moves with the read-out.
+    rebuildPath();
 
     // Candidate point at the (snapped) live-line end.
     if (_candDotSwitch) {
@@ -416,6 +446,91 @@ void AxisFlowCompass::applyCandidateAxisStyle(int weightPx, double transparency)
     }
 }
 
+void AxisFlowCompass::setPathState(bool active, bool lockU, bool lockV,
+                                   bool hasSnap, const SbVec3f& snapWorld)
+{
+    const bool same = (active == _pathActive)
+                   && (lockU == _pathLockU)
+                   && (lockV == _pathLockV)
+                   && (hasSnap == _pathHasSnap)
+                   && (snapWorld == _pathSnapWorld);
+    if (same)
+        return;
+
+    _pathActive    = active;
+    _pathLockU     = lockU;
+    _pathLockV     = lockV;
+    _pathHasSnap   = hasSnap;
+    _pathSnapWorld = snapWorld;
+    rebuildPath();
+}
+
+void AxisFlowCompass::applyPathStyle(bool enabled, int style, unsigned long rgba)
+{
+    _pathEnabled = enabled;
+    if (_matPath) {
+        float r, g, b, a;
+        AxisFlowSettings::unpackColor(rgba, r, g, b, a);
+        _matPath->diffuseColor.setValue(r, g, b);
+    }
+    if (_stylePath) {
+        static const unsigned short kPat[4] = { 0xFFFF, 0xF0F0, 0xAAAA, 0xFF18 };
+        const int idx = (style < 0 || style > 3) ? 1 : style;
+        _stylePath->linePattern.setValue(kPat[idx]);
+    }
+    rebuildPath();
+}
+
+void AxisFlowCompass::rebuildPath()
+{
+    if (!_pathSwitch)
+        return;
+
+    auto hide = [this]() {
+        _linePath->numVertices.setValue(0);
+        _pathSwitch->whichChild.setValue(SO_SWITCH_NONE);
+    };
+
+    if (!_pathEnabled || !_pathActive) {
+        hide();
+        return;
+    }
+
+    // The shape itself is decided by buildCompassPath() (AxisFlowPath.h, pure
+    // and Tier-1 tested). This function only supplies compass-local input and
+    // hands the result to Coin.
+    //
+    // _localEnd is the PCP: the tool feeds the SOLVED point in through
+    // setCursorPoint(), so every lock is already baked into it.
+    PathInput in;
+    in.pcp    = PathPoint { _localEnd[0], _localEnd[1], _localEnd[2] };
+    in.lockU  = _pathLockU;
+    in.lockV  = _pathLockV;
+    in.hasSnap = _pathHasSnap;
+    if (_pathHasSnap) {
+        // Same local frame as _localEnd: the basis is orthonormal, so a dot
+        // product is the inverse transform.
+        const SbVec3f d = _pathSnapWorld - _origin;
+        in.snap = PathPoint { d.dot(_u), d.dot(_v), d.dot(_n) };
+    }
+
+    PathPoint local[kMaxPathPoints];
+    const int n = buildCompassPath(in, local);
+    if (n < 2) {                 // everything collapsed onto the centre
+        hide();
+        return;
+    }
+
+    SbVec3f pts[kMaxPathPoints];
+    for (int i = 0; i < n; ++i)
+        pts[i] = SbVec3f(float(local[i].x), float(local[i].y), float(local[i].z));
+
+    _coordPath->point.setValues(0, n, pts);
+    _coordPath->point.setNum(n);
+    _linePath->numVertices.setValue(n);
+    _pathSwitch->whichChild.setValue(0);
+}
+
 void AxisFlowCompass::setIndexingCandidates(bool distanceActive, bool axisActive)
 {
     if (distanceActive == _distCandActive && axisActive == _axisCandActive)
@@ -440,6 +555,14 @@ AxisFlowCompass::~AxisFlowCompass()
         _animSensor->unschedule();
         delete _animSensor;
         _animSensor = nullptr;
+    }
+    // The constructor ref'd the root; without the matching unref the whole
+    // compass subgraph outlived every session, one leaked copy per tool.
+    // The scenegraph holds its own reference until deactivate() removes it,
+    // so this only ever drops OUR reference.
+    if (_root) {
+        _root->unref();
+        _root = nullptr;
     }
 }
 

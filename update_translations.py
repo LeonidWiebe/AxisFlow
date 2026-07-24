@@ -5,15 +5,18 @@ all translations, following the FreeCAD "translating an external workbench"
 procedure (https://wiki.freecad.org/Translating_an_external_workbench).
 
 What it does:
-  1. Extract user-visible strings from the Python UI (pylupdate) and the C++
-     sources (lupdate) and merge them into  translations/AxisFlow.ts  (the base
-     source template, context-grouped).
+  1. Extract user-visible strings from the Python UI and the C++ sources in ONE
+     lupdate pass (Qt6 lupdate reads .py too) into translations/AxisFlow.ts,
+     then merge the same set into every translations/AxisFlow_<lang>.ts --
+     keeping existing translations and flagging new strings as unfinished.
   2. Compile every  translations/AxisFlow_<lang>.ts  into a  .qm  (lrelease),
      which is what FreeCAD loads at runtime.
 
-Requires Qt Linguist tools on PATH. On Qt5:  pylupdate5, lupdate, lconvert,
-lrelease  (Debian/Ubuntu: pyqt5-dev-tools + qttools5-dev-tools). On Qt6 a single
-lupdate handles both .py and C++; pyside6-lupdate / pyside6-lrelease also work.
+Requires Qt Linguist tools on PATH: lupdate and lrelease. Debian/Ubuntu:
+qt6-l10n-tools (or qttools5-dev-tools). Anywhere with pip:
+    pip install PySide6-Essentials      # gives pyside6-lupdate / pyside6-lrelease
+Note that PySide6 does NOT ship lconvert, which is why this script no longer
+uses it.
 
 Usage:
     python update_translations.py            # extract + compile
@@ -48,34 +51,38 @@ def _run(cmd):
 
 
 def extract():
+    """Refresh the base template AND merge into every AxisFlow_<lang>.ts.
+
+    One lupdate pass over both the Python and the C++ sources: Qt6's lupdate
+    parses .py directly, so the old two-pass + lconvert merge is unnecessary --
+    and lconvert is not shipped by PySide6 at all, which used to stop this
+    script dead. Running lupdate against a language file MERGES: existing
+    translations are kept, new strings arrive as `type="unfinished"`, and
+    strings that disappeared from the sources are marked obsolete rather than
+    dropped.
+    """
     os.makedirs(TRDIR, exist_ok=True)
-    pylupdate = _find("pylupdate5", "pylupdate6", "pyside6-lupdate", "pyside2-lupdate", "pylupdate")
     lupdate = _find("lupdate", "lupdate-qt5", "lupdate6", "pyside6-lupdate")
-    lconvert = _find("lconvert", "lconvert-qt5")
-    if not (lupdate and lconvert):
-        sys.exit("error: need 'lupdate' and 'lconvert' on PATH (Qt Linguist tools).")
+    if not lupdate:
+        sys.exit("error: need 'lupdate' on PATH (Qt Linguist tools, or "
+                 "pip install PySide6-Essentials).")
 
-    py_ts = os.path.join(TRDIR, "_py.ts")
-    cpp_ts = os.path.join(TRDIR, "_cpp.ts")
+    sources = list(PY_FILES)
+    for d in CPP_DIRS:
+        for name in sorted(os.listdir(os.path.join(ROOT, d))):
+            if name.endswith((".cpp", ".h")):
+                sources.append(os.path.join(d, name))
 
-    print("Extracting Python strings...")
-    if pylupdate and "pyside" not in os.path.basename(pylupdate):
-        _run([pylupdate] + PY_FILES + ["-ts", py_ts])
-    else:
-        # Qt6 lupdate / pyside lupdate parse .py directly.
-        _run([lupdate] + PY_FILES + ["-ts", py_ts])
+    print("Updating the base template...")
+    _run([lupdate] + sources + ["-ts", os.path.relpath(BASE, ROOT)])
 
-    print("Extracting C++ strings...")
-    _run([lupdate, "-recursive"] + CPP_DIRS + ["-ts", cpp_ts])
-
-    print("Merging -> translations/AxisFlow.ts")
-    _run([lconvert, "-i", py_ts, cpp_ts, "-o", BASE])
-    for f in (py_ts, cpp_ts):
-        try:
-            os.remove(f)
-        except OSError:
-            pass
-    print("  base source updated. Translate copies named AxisFlow_<lang>.ts.")
+    langs = sorted(n for n in os.listdir(TRDIR)
+                   if n.endswith(".ts") and n != os.path.basename(BASE))
+    for name in langs:
+        print("Merging into %s..." % name)
+        _run([lupdate] + sources + ["-ts", os.path.join("translations", name)])
+    print("  %d language file(s) merged. Translate anything left "
+          "type=\"unfinished\"." % len(langs))
 
 
 def compile_qm():

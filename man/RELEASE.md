@@ -26,15 +26,22 @@ vice-versa. Therefore:
   (state exactly which one), and
 - **test the ZIP on a clean install** of that FreeCAD before publishing.
 
-Name releases accordingly, e.g. `AxisFlow-0.1.3-win64-FC1.1.zip`.
+Name releases accordingly, e.g. `AxisFlow-0.2.0-win64-FC1.1.zip`.
 
 ## Cutting a release (maintainer)
 
-1. Bump `<version>`/`<date>` in `package.xml` (and `VERSION` in `make_release.bat`,
-   the project version in `CMakeLists.txt`). Move the `[Unreleased]` notes in
-   `CHANGELOG.md` under a new dated version heading and update the compare links.
-2. Build + run the tests once (`run_tests.bat`).
-3. Build the module and package it:
+1. Bump the version in ALL of these -- they drift apart otherwise:
+   `package.xml` (`<version>` and `<date>`), `CMakeLists.txt` (`project(...)`),
+   `make_release.bat`, `build_installer.bat`, `installer/AxisFlow.nsi`
+   (`APPVERSION`) and the line under the title in `README.md`. Move the
+   `[Unreleased]` notes in `CHANGELOG.md` under a new dated version heading and
+   update the compare links.
+2. Refresh the translations (`python update_translations.py`) and translate
+   anything it leaves marked `type="unfinished"`; the `.qm` files are what
+   actually ship.
+3. Build + run the tests once (`run_tests.bat`), and the offline demo harness
+   (`python3 tests/demo_arc_harness.py`).
+4. Build the module and package it:
    ```bat
    cmake --build build --config RelWithDebInfo --target AxisFlow
    make_release.bat
@@ -47,8 +54,8 @@ Name releases accordingly, e.g. `AxisFlow-0.1.3-win64-FC1.1.zip`.
    list: **every newly shipped file must be added there and to the CMake
    `install()` rules**, or it will be missing from installs (this has bitten us
    with the translations and with `package.xml`).
-4. Test the ZIP on a clean FreeCAD (unzip into `Mod`, restart, use it).
-5. On GitHub: create a **tag** (e.g. `v0.1.3`) and a **Release**, attach the ZIP,
+5. Test the ZIP on a clean FreeCAD (unzip into `Mod`, restart, use it).
+6. On GitHub: create a **tag** (e.g. `v0.2.0`) and a **Release**, attach the ZIP,
    paste install instructions + which FreeCAD build it targets.
 
 ## Installing (end users)

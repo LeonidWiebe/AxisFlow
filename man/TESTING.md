@@ -14,15 +14,20 @@ error -- the same limitation every FreeCAD GUI workbench has. Consequences:
 * the **Python API** is tested inside a GUI FreeCAD (`FreeCAD --run-test`);
 * the **compass/panel rendering and live input** stay on the manual checklist.
 
-## Tier 1 -- C++ unit tests (solver, indexing, hotkeys, entry policy)
+## Tier 1 -- C++ unit tests (solver, indexing, hotkeys, entry policy, key routing)
 
 Pure logic, no Coin, no FreeCADGui, no display. Fast and deterministic. Uses
 GoogleTest (FreeCAD's own C++ test framework), fetched at configure time.
 
-Four suites live in `tests/`: `test_solver.cpp` (constraints, locks, working-plane
+Six suites live in `tests/`: `test_solver.cpp` (constraints, locks, working-plane
 maths), `test_indexing.cpp` (the live-line indexing policy, plus how object snaps
-and Smart lock interact with it), `test_hotkeys.cpp` (the key map) and
-`test_entry.cpp` (typed-value entry policy). `AxisFlowIndexing.h` is deliberately
+and Smart lock interact with it), `test_hotkeys.cpp` (the key map),
+`test_entry.cpp` (typed-value entry policy), `test_keyrouting.cpp` (which key
+goes where: modifiers, the off state, Tab, auto-repeat, field vs view, adapter
+mode, two-key chords, and the rule that Backspace/Delete are only ours while a
+value is actually being typed) and `test_path.cpp` (the compass-path poly-line:
+its shape under each combination of frozen in-plane fields, the snap leg, and
+the dropping of zero-length legs). `AxisFlowIndexing.h` is deliberately
 a header-only pure function, so the whole indexing policy is testable without any
 FreeCAD object graph -- keep it that way when extending it.
 
@@ -115,6 +120,18 @@ cmake -B build -G "Visual Studio 17 2022" -A x64 -DAXISFLOW_BUILD_TESTS=ON
 cmake --build build --config RelWithDebInfo --target AxisFlow_tests_run
 set PATH=C:\projects\FreeCAD111\.pixi\envs\default\Library\bin;C:\projects\FreeCAD111\.pixi\envs\default;%PATH%
 ctest --test-dir build -C RelWithDebInfo --output-on-failure
+```
+
+### Offline: the line demo's own harness
+
+`tests/demo_arc_harness.py` runs `axisflow_demo.py` against stubbed
+FreeCAD/Part modules, so the consumer-side bookkeeping -- which segment carries
+an arc, what a mode toggle abandons, where the compass is parked while an arc is
+drawn, what happens when the document changes underneath -- can be checked with
+plain `python3`, with no FreeCAD at all:
+
+```bash
+python3 tests/demo_arc_harness.py
 ```
 
 ### Tier 2 -- by hand in a GUI FreeCAD

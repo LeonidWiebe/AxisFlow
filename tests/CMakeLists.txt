@@ -43,6 +43,8 @@ add_executable(AxisFlow_tests_run
     test_hotkeys.cpp
     test_entry.cpp
     test_indexing.cpp
+    test_keyrouting.cpp
+    test_path.cpp
     # Units under test:
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/AxisFlowSolver.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../src/AxisFlowHotkeys.cpp

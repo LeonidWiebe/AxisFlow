@@ -3,10 +3,10 @@
   <name>AxisFlow</name>
   <description>
     Dynamic precision drawing assistant for FreeCAD: an AccuDraw-style compass
-    with unit-aware coordinate input, axis locks, and a live guide line.
+    with numeric coordinate input, axis locks, and a live guide line.
   </description>
-  <version>0.1.3</version>
-  <date>2026-07-17</date>
+  <version>0.2.0</version>
+  <date>2026-07-24</date>
   <maintainer email="[email protected]">Leonid Wiebe</maintainer>
   <license file="LICENSE">LGPL-2.1-or-later</license>
 

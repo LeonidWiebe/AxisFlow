@@ -3,6 +3,7 @@
 #include "AxisFlowEventFilter.h"
 #include "AxisFlowService.h"
 #include "AxisFlowPanel.h"
+#include "AxisFlowKeyContext.h"
 
 #include <Gui/View3DInventor.h>
 #include <Gui/MainWindow.h>
@@ -43,17 +44,6 @@ void AxisFlowEventFilter::remove()
 
 // ---------------------------------------------------------------------------
 
-bool AxisFlowEventFilter::isValueChar(const QKeyEvent* ke)
-{
-    const QString& t = ke->text();
-    if (t.isEmpty()) return false;
-    const QChar c = t.at(0);
-    return c.isDigit()
-        || c == QLatin1Char('.')
-        || c == QLatin1Char(',')
-        || c == QLatin1Char('-');
-}
-
 bool AxisFlowEventFilter::inScope() const
 {
     // A modal dialog owns the keyboard, full stop.
@@ -75,7 +65,7 @@ bool AxisFlowEventFilter::inScope() const
     }
 
     if (_view) {
-        if (auto* vw = qobject_cast<QWidget*>(_view)) {
+        if (auto* vw = qobject_cast<QWidget*>(_view.data())) {
             if (fw == vw || vw->isAncestorOf(fw))
                 return true;
         }
@@ -92,34 +82,6 @@ bool AxisFlowEventFilter::inScope() const
     return fw->window() == Gui::getMainWindow();
 }
 
-bool AxisFlowEventFilter::claims(const QKeyEvent* ke) const
-{
-    // Modified keys (Ctrl+S, Alt+F4, ...) always belong to the application.
-    if (ke->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier))
-        return false;
-
-    if (AxisFlowService::instance().actionForKey(ke->key()) != AxisAction::None)
-        return true;
-
-    if (!_ownsInput)
-        return false;
-
-    // Editing keys must be claimed too: with focus back in the 3-D view (which
-    // happens as soon as the mouse moves) they would otherwise be lost, and
-    // Backspace would silently do nothing.
-    switch (ke->key()) {
-    case Qt::Key_Backspace:
-    case Qt::Key_Delete:
-    case Qt::Key_Tab:
-    case Qt::Key_Backtab:
-        return true;
-    default:
-        break;
-    }
-
-    return isValueChar(ke);
-}
-
 // ---------------------------------------------------------------------------
 
 bool AxisFlowEventFilter::eventFilter(QObject* watched, QEvent* ev)
@@ -128,63 +90,52 @@ bool AxisFlowEventFilter::eventFilter(QObject* watched, QEvent* ev)
     if (t != QEvent::KeyPress && t != QEvent::ShortcutOverride)
         return QObject::eventFilter(watched, ev);
 
-    if (!AxisFlowService::instance().isActive()) {
-        // While OFF the filter stays out of the way -- except for the one key
-        // whose whole job is to turn AxisFlow back ON. Without this the toggle
-        // was a one-way switch: the key deactivated, then never came back.
-        auto* ke = static_cast<QKeyEvent*>(ev);
-        if ((ke->modifiers() & (Qt::ControlModifier | Qt::AltModifier | Qt::MetaModifier)) == 0
-            && AxisFlowService::instance().actionForKey(ke->key()) == AxisAction::ToggleActive
-            && inScope()) {
-            if (t == QEvent::ShortcutOverride) { ev->accept(); return true; }
-            if (!ke->isAutoRepeat())
-                AxisFlowService::instance().performAction(AxisAction::ToggleActive);
-            return true;
-        }
-        return QObject::eventFilter(watched, ev);
-    }
-
+    // Focus topology is this filter's business; what a key MEANS is not. The
+    // panel runs its own filter, so anything focused there is out of scope and
+    // never reaches the routing below with inField=true.
     if (!inScope())
         return QObject::eventFilter(watched, ev);
 
     auto* ke = static_cast<QKeyEvent*>(ev);
-    if (!claims(ke))
+    const KeyContext ctx = keyContextFromEvent(ke, /*inField*/ false, _ownsInput);
+    const KeyRoute route = routeKey(ctx);
+
+    if (!routeClaimsKey(route))
         return QObject::eventFilter(watched, ev);
 
     // Stop Qt from resolving this key as a global QAction shortcut (digits are
     // bound to Std_ViewTop and friends). Accepting the override makes Qt deliver
     // an ordinary KeyPress next, which is where we do the work.
+    //
+    // This matters doubly while a chord is pending: every plain key then routes
+    // to something claimed, so the second key of R X cannot leak out and fire
+    // the X lock (or a camera shortcut) before we resolve the chord.
     if (t == QEvent::ShortcutOverride) {
         ev->accept();
         return true;
     }
 
-    if (ke->isAutoRepeat())
-        return true;   // claimed, but do not repeat-fire a lock toggle
+    applyChordState(ke, route);   // start / end the two-key chord wait
 
     AxisFlowService& svc = AxisFlowService::instance();
-    AxisAction a = svc.actionForKey(ke->key());
-    if (a == AxisAction::CancelEntry) {
-        AxisFlowPanel::instance()->cancelInput();   // layered: entry -> locks
-        return true;
-    }
-    if (a != AxisAction::None) {
-        svc.performAction(a);
-        return true;
-    }
+    AxisFlowPanel*   panel = AxisFlowPanel::instance();
 
-    if (_ownsInput) {
-        AxisFlowPanel* panel = AxisFlowPanel::instance();
-
-        if (ke->key() == Qt::Key_Backspace) { panel->backspaceEntry(); return true; }
-        if (ke->key() == Qt::Key_Delete)    { panel->clearEntry();     return true; }
-        if (ke->key() == Qt::Key_Tab ||
-            ke->key() == Qt::Key_Backtab)   { panel->cycleActiveField(); return true; }
-
-        // "Just start typing": seed the panel's primary field. The panel window
+    switch (route) {
+    case KeyRoute::BeginChord:
+    case KeyRoute::ChordHold:   return true;   // waiting for the second key
+    case KeyRoute::Action:      svc.performAction(ctx.bound); return true;
+    case KeyRoute::CancelEntry: panel->cancelInput();         return true;   // entry -> locks
+    case KeyRoute::Backspace:   panel->backspaceEntry();      return true;
+    case KeyRoute::ClearEntry:  panel->clearEntry();          return true;
+    case KeyRoute::TabCycle:    panel->cycleActiveField();    return true;
+    case KeyRoute::StartTyping:
+        // "Just start typing": seed the panel's active field. The panel window
         // is activated, so the caret shows and the rest is typed natively.
-        if (isValueChar(ke) && panel->startTyping(ke->text().at(0)))
+        if (!ke->text().isEmpty() && panel->startTyping(ke->text().at(0)))
             return true;
+        break;
+    case KeyRoute::Swallow:     return true;   // claimed, e.g. a held lock key
+    default:                    break;
     }
 
     return QObject::eventFilter(watched, ev);

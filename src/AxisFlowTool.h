@@ -3,17 +3,21 @@
 #include <Inventor/nodes/SoEventCallback.h>
 #include <Inventor/SbVec3f.h>
 
+#include <QtCore/QPointer>
+
+// Must be the complete type, not a forward declaration: QPointer<T>::data()
+// static_casts a QObject* to T*, which only compiles once the compiler can see
+// that T really does derive from QObject.
+#include <Gui/View3DInventor.h>
+
 #include "AxisFlowService.h"   // service + solver enums
 #include "AxisFlowCompass.h"
 
 namespace AxisFlowGui { class AxisFlowEventFilter; }
 
+class SoCamera;
 class SoNodeSensor;
 class SoSensor;
-
-namespace Gui {
-    class View3DInventor;
-}
 
 namespace AxisFlowGui {
 
@@ -26,7 +30,9 @@ namespace AxisFlowGui {
  *
  * Two modes, chosen at activate():
  *   - withPositionSource = true  (standalone): install the Coin callback; mouse
- *     moves feed AxisFlowService::updateCursor, clicks confirm points.
+ *     moves feed AxisFlowService::updateCursor, clicks confirm points. Keys are
+ *     NOT read here -- they are claimed at the qApp level by
+ *     AxisFlowEventFilter and routed by routeKey() (AxisFlowKeyRouting.h).
  *   - withPositionSource = false (Snapper adapter): NO Coin callback; the cursor
  *     is driven externally (the Python adapter calls AD.updateCursor), and this
  *     tool just reflects it on the compass via the cursorMoved signal.
@@ -43,6 +49,24 @@ public:
     void deactivate();
     bool isActive() const { return _active; }
 
+    /**
+     * The session that is live right now, whoever started it, or null.
+     *
+     * There are two independent owners of tools: the palette command
+     * (CmdAxisFlowActivate) and the Python API (g_session, behind getPoint).
+     * Each used to look only at its own pointer, so pressing "Activate" while a
+     * getPoint consumer was running built a SECOND tool on the same view --
+     * the button then appeared to do nothing on the first press and to switch
+     * AxisFlow off on the second. One live session at a time, and both owners
+     * ask here.
+     */
+    static AxisFlowTool* current() { return s_current; }
+
+    /** The view this tool is bound to, or null once that view has been
+     *  destroyed (its document was closed). Callers that cache a session must
+     *  check this before reusing it in another document. */
+    Gui::View3DInventor* view() const { return _view.data(); }
+
     Base::Vector3d lastPoint() const { return _lastPoint; }
 
     /** Diagnostics: the live compass (may be null before activate()). */
@@ -57,9 +81,9 @@ public:
      *                click confirms the next one (this is where entry happens).
      *   Finished   - the command ended (Cancel key, or a consumer stopped it).
      *
-     * Escape is layered, per the agreed behaviour: it first cancels an active
-     * value entry, then releases locks; it does NOT end the command (a separate
-     * Cancel key does).
+     * Escape defaults to FinishLine (finish this polyline, keep the session);
+     * the backtick ends the whole command. The layered cancel (entry, then
+     * locks) is the CancelEntry action, which ships unbound.
      */
     enum class InputState { Idle, Tracking, Finished };
     InputState inputState() const { return _state; }
@@ -91,9 +115,10 @@ private Q_SLOTS:
 private:
     static void coinEventCB(void* userData, SoEventCallback* node);
     void        handleCoinEvent(SoEventCallback* node);
+    /** The actual work; handleCoinEvent only wraps it in the re-entrancy
+     *  guard. Kept apart so the guard cannot be escaped by an early return. */
+    void        handleCoinEventBody(SoEventCallback* node);
 
-    /** Escape: cancel entry, then release locks (never ends the command). */
-    void handleEscape();
     /** Cancel key: finish the command outright. */
     void cancelInput();
     /** A point was placed (click or typed+confirm): advance the machine. */
@@ -118,6 +143,10 @@ private:
 
     /** Recompute the compass size whenever the camera changes (zoom, orbit). */
     static void cameraChangedCB(void* userData, SoSensor* sensor);
+    /** The view is being destroyed (its document is closing): tear everything
+     *  down while we still can, WITHOUT touching the view. */
+    void onViewDestroyed();
+
     void attachCameraSensor();
     void detachCameraSensor();
 
@@ -125,13 +154,46 @@ private:
     void     confirmPoint();
     void     applyModeToUi();
 
-    static int coinKeyToQt(int coinKey);
+    /**
+     * The 3-D view, held WEAKLY.
+     *
+     * A view dies whenever its document is closed, and it takes its viewer,
+     * scenegraph and camera with it. A raw pointer here used to outlive all of
+     * that, so the tool dereferenced freed memory the next time anything
+     * touched it -- and ~AxisFlowTool did exactly that while the view was
+     * being destroyed, because Qt deletes children only after the parent's own
+     * destructor has run. QPointer goes null by itself, so every use below is
+     * a plain null check.
+     */
+    QPointer<Gui::View3DInventor> _view;
 
-    Gui::View3DInventor* _view    { nullptr };
+    /** The single live session; see current(). */
+    static AxisFlowTool* s_current;
     SoEventCallback*     _eventCB { nullptr };
     AxisFlowCompass*     _compass { nullptr };
     AxisFlowEventFilter* _keyFilter { nullptr };   // adapter mode only
     SoNodeSensor*        _camSensor { nullptr };   // recompute size on zoom/orbit
+    /** The camera the sensor watches, ref'd for as long as we watch it, so it
+     *  cannot be freed under the sensor when the view goes away. */
+    SoCamera*            _camWatched { nullptr };
+
+    /**
+     * Re-entrancy guard for the Coin callback.
+     *
+     * Handling a mouse move calls into Python (object snapping, and
+     * cursorMoved -> the getPoint consumer), and the consumer is free to end
+     * the session from there -- the line demo does exactly that when it notices
+     * that the document changed under it. Tearing down synchronously would
+     * remove and unref the very SoEventCallback that Coin is dispatching
+     * through, and whose setHandled() is called moments later: an access
+     * violation. While the guard is up, deactivate() only records the request
+     * and the teardown runs from the event loop instead.
+     *
+     * The keyboard path never hit this, which is why ending with the backtick
+     * always looked fine: keys arrive through the Qt filter, not through Coin.
+     */
+    bool                 _inCoinCallback     { false };
+    bool                 _deactivateDeferred { false };
 
     Base::Vector3d       _lastPoint;
     InputState           _state { InputState::Idle };

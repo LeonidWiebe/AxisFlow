@@ -9,6 +9,8 @@
 #include <Base/Vector3D.h>
 #include <Base/Exception.h>
 
+#include <QtCore/QObject>
+
 #include <Gui/Application.h>
 #include <Gui/Document.h>
 #include <Gui/View3DInventor.h>
@@ -27,6 +29,26 @@ using namespace AxisFlowGui;
 // ---------------------------------------------------------------------------
 
 static AxisFlowTool* g_session = nullptr;
+
+/**
+ * Create the session tool bound to @p v, parented to it.
+ *
+ * The parent matters: closing a document destroys its view, and the tool has
+ * to go with it -- otherwise it outlives its viewer, scenegraph and camera and
+ * every later call dereferences freed memory. The destroyed hook then clears
+ * g_session, so the next call builds a fresh session instead of reusing a
+ * corpse. The identity test guards the deleteLater() case, where an OLD tool
+ * is destroyed after a NEW one has already been installed.
+ */
+static AxisFlowTool* makeSession(Gui::View3DInventor* v)
+{
+    auto* tool = new AxisFlowTool(v, v);
+    QObject::connect(tool, &QObject::destroyed, [](QObject* obj) {
+        if (static_cast<QObject*>(g_session) == obj)
+            g_session = nullptr;
+    });
+    return tool;
+}
 
 static Gui::View3DInventor* activeView3D()
 {
@@ -53,6 +75,11 @@ static AxisAction actionFromString(const std::string& s)
     if (s == "rotateside")   return AxisAction::RotateSide;
     if (s == "rotatebyview") return AxisAction::RotateByView;
     if (s == "rotatecycle")  return AxisAction::RotateCycle;
+    if (s == "rotateaboutx") return AxisAction::RotateAboutX;
+    if (s == "rotatealongx") return AxisAction::RotateAboutX;   // tolerated alias
+    if (s == "rotateabouty") return AxisAction::RotateAboutY;
+    if (s == "rotateaboutz") return AxisAction::RotateAboutZ;
+    if (s == "togglesegmentmode") return AxisAction::ToggleSegmentMode;
     if (s == "clearlocks") return AxisAction::ClearLocks;
     if (s == "cancelentry") return AxisAction::CancelEntry;
     if (s == "cancelcommand") return AxisAction::CancelCommand;
@@ -341,7 +368,7 @@ PyObject* axisflow_beginSession(PyObject*, PyObject*)
 
     Gui::View3DInventor* v = activeView3D();
     if (v) {
-        g_session = new AxisFlowTool(v);
+        g_session = makeSession(v);
         g_session->activate(false);   // adapter mode: no Coin position source
         return PyBool_FromLong(1);
     }
@@ -353,7 +380,17 @@ PyObject* axisflow_beginSession(PyObject*, PyObject*)
 // position source). getPoint always runs its own input, never the adapter.
 static bool ensureOwnSession()
 {
-    if (g_session && g_session->hasPositionSource() && g_session->isActive())
+    Gui::View3DInventor* v = activeView3D();
+    if (!v)
+        return false;
+
+    // Reuse only a session that is still bound to the view the user is looking
+    // at. Opening or creating another document gives a NEW view; the old
+    // session then belongs to a window that is no longer active (or has been
+    // destroyed outright), and carrying on with it put the compass in one
+    // document while the points went to another.
+    if (g_session && g_session->hasPositionSource() && g_session->isActive()
+        && g_session->view() == v)
         return true;
 
     if (g_session) {
@@ -361,29 +398,51 @@ static bool ensureOwnSession()
         g_session->deleteLater();
         g_session = nullptr;
     }
-    Gui::View3DInventor* v = activeView3D();
-    if (!v)
-        return false;
 
-    g_session = new AxisFlowTool(v);
+    g_session = makeSession(v);
     g_session->activate(true);   // own tool: Coin position source + keyboard
     return true;
+}
+
+PyObject* axisflow_setBasePoint(PyObject*, PyObject* args)
+{
+    // Move the compass anchor WITHOUT confirming a point: no pointConfirmed
+    // fires, so the consumer's callback is not re-entered. Used by the line
+    // demo to park the compass on the chord midpoint while the arc's bulge
+    // point is being picked, and on the arc end once it is done.
+    PyObject* o = nullptr;
+    if (!PyArg_ParseTuple(args, "O", &o))
+        return nullptr;
+    if (!g_session) {
+        PyErr_SetString(PyExc_RuntimeError,
+                        "AxisFlow.setBasePoint: no active session");
+        return nullptr;
+    }
+    try {
+        g_session->setBasePoint(Py::Vector(Py::Object(o)).toVector());
+    }
+    catch (const Py::Exception&) {
+        return nullptr;   // Py error already set
+    }
+    Py_RETURN_NONE;
 }
 
 PyObject* axisflow_getPoint(PyObject*, PyObject* args, PyObject* kwds)
 {
     static const char* kwlist[] = {
-        "callback", "movecallback", "last", "continuous", "finishcallback", nullptr
+        "callback", "movecallback", "last", "continuous", "finishcallback",
+        "modecallback", nullptr
     };
     PyObject* cb       = nullptr;
     PyObject* moveCb   = nullptr;
     PyObject* lastObj  = nullptr;
     int       continuous = 0;
     PyObject* finishCb = nullptr;
+    PyObject* modeCb   = nullptr;
     if (!PyArg_ParseTupleAndKeywords(
-            args, kwds, "|OOOpO",
+            args, kwds, "|OOOpOO",
             const_cast<char**>(kwlist),
-            &cb, &moveCb, &lastObj, &continuous, &finishCb))
+            &cb, &moveCb, &lastObj, &continuous, &finishCb, &modeCb))
         return nullptr;
 
     auto validCallable = [](PyObject* o, const char* name) -> bool {
@@ -394,11 +453,13 @@ PyObject* axisflow_getPoint(PyObject*, PyObject* args, PyObject* kwds)
         return true;
     };
     if (!validCallable(cb, "callback") || !validCallable(moveCb, "movecallback")
-        || !validCallable(finishCb, "finishcallback"))
+        || !validCallable(finishCb, "finishcallback")
+        || !validCallable(modeCb, "modecallback"))
         return nullptr;
     if (cb == Py_None)     cb = nullptr;
     if (moveCb == Py_None) moveCb = nullptr;
     if (finishCb == Py_None) finishCb = nullptr;
+    if (modeCb == Py_None)   modeCb = nullptr;
 
     if (!ensureOwnSession()) {
         PyErr_SetString(PyExc_RuntimeError,
@@ -421,7 +482,8 @@ PyObject* axisflow_getPoint(PyObject*, PyObject* args, PyObject* kwds)
         }
     }
 
-    auto* bridge = new GetPointBridge(g_session, cb, moveCb, finishCb, continuous != 0);
+    auto* bridge = new GetPointBridge(g_session, cb, moveCb, finishCb, modeCb,
+                                      continuous != 0);
     bridge->start();
 
     Py_RETURN_NONE;
@@ -475,17 +537,43 @@ PyObject* axisflow_setHotkeys(PyObject*, PyObject* args)
     if (!fast)
         return nullptr;
 
-    std::vector<int> keys;
+    // Each item is either a plain Qt key code, or a two-element sequence
+    // holding a chord: setHotkeys("RotateAboutX", [[Qt.Key_R, Qt.Key_X]]).
+    std::vector<KeyChord> keys;
     const Py_ssize_t n = PySequence_Fast_GET_SIZE(fast);
     for (Py_ssize_t i = 0; i < n; ++i) {
         PyObject* item = PySequence_Fast_GET_ITEM(fast, i);   // borrowed
-        const long v = PyLong_AsLong(item);
-        if (v == -1 && PyErr_Occurred()) { Py_DECREF(fast); return nullptr; }
-        if (v > 0) keys.push_back(static_cast<int>(v));
+
+        if (PyLong_Check(item)) {
+            const long v = PyLong_AsLong(item);
+            if (v == -1 && PyErr_Occurred()) { Py_DECREF(fast); return nullptr; }
+            if (v > 0) keys.push_back(KeyChord{static_cast<int>(v), 0});
+            continue;
+        }
+
+        PyObject* pair = PySequence_Fast(item, "a chord must be a sequence of two key codes");
+        if (!pair) { Py_DECREF(fast); return nullptr; }
+        const Py_ssize_t m = PySequence_Fast_GET_SIZE(pair);
+        if (m != 1 && m != 2) {
+            Py_DECREF(pair); Py_DECREF(fast);
+            PyErr_SetString(PyExc_ValueError,
+                            "a key binding is one key or a chord of exactly two");
+            return nullptr;
+        }
+        const long k1 = PyLong_AsLong(PySequence_Fast_GET_ITEM(pair, 0));
+        const long k2 = (m == 2) ? PyLong_AsLong(PySequence_Fast_GET_ITEM(pair, 1)) : 0;
+        Py_DECREF(pair);
+        if (PyErr_Occurred()) { Py_DECREF(fast); return nullptr; }
+        if (k1 > 0) keys.push_back(KeyChord{static_cast<int>(k1), static_cast<int>(k2)});
     }
     Py_DECREF(fast);
 
-    AxisFlowService::instance().setHotkeys(a, keys, persist != 0);
+    if (!AxisFlowService::instance().setHotkeys(a, keys, persist != 0)) {
+        PyErr_SetString(PyExc_ValueError,
+                        "these keys break the single/chord rule: a key is either a "
+                        "binding of its own or the first key of a chord, not both");
+        return nullptr;
+    }
     Py_RETURN_NONE;
 }
 
@@ -534,6 +622,9 @@ PyObject* axisflow_getSettings(PyObject*, PyObject*)
     setItem("liveLineEnabled",  PyBool_FromLong(s.liveLineEnabled() ? 1 : 0));
     setItem("liveLineStyle",    PyLong_FromLong(s.liveLineStyle()));
     setItem("liveLineColor",    PyLong_FromUnsignedLong(s.liveLineColor()));
+    setItem("compassPathEnabled", PyBool_FromLong(s.compassPathEnabled() ? 1 : 0));
+    setItem("compassPathStyle",   PyLong_FromLong(s.compassPathStyle()));
+    setItem("compassPathColor",   PyLong_FromUnsignedLong(s.compassPathColor()));
     setItem("useDistanceIndexing", PyBool_FromLong(s.useDistanceIndexing() ? 1 : 0));
     setItem("useAxesIndexing",     PyBool_FromLong(s.useAxesIndexing() ? 1 : 0));
     setItem("indexingTolerance",   PyLong_FromLong(s.indexingTolerance()));
@@ -547,15 +638,17 @@ PyObject* axisflow_getSettings(PyObject*, PyObject*)
     setItem("compassRotateAnimation", PyFloat_FromDouble(s.compassRotateAnimation()));
 
     // Hotkeys as {'SmartLock': [16777220, 16777221], ...}; [] means unbound.
+    // A two-key chord appears as a nested pair: {'RotateAboutX': [[82, 88]]}.
     PyObject* hk = PyDict_New();
     if (hk) {
         const Hotkeys& h = AxisFlowService::instance().hotkeys();
         for (AxisAction a : Hotkeys::allActions()) {
-            const std::vector<int> keys = h.keysFor(a);
             PyObject* lst = PyList_New(0);
             if (!lst) continue;
-            for (int k : keys) {
-                PyObject* v = PyLong_FromLong(k);
+            for (const KeyChord& c : h.chordsFor(a)) {
+                PyObject* v = c.isChord()
+                    ? Py_BuildValue("[i,i]", c.first, c.second)
+                    : PyLong_FromLong(c.first);
                 if (v) { PyList_Append(lst, v); Py_DECREF(v); }
             }
             PyDict_SetItemString(hk, Hotkeys::name(a), lst);
@@ -564,6 +657,53 @@ PyObject* axisflow_getSettings(PyObject*, PyObject*)
         PyDict_SetItemString(d, "hotkeys", hk);
         Py_DECREF(hk);
     }
+    return d;
+}
+
+PyObject* axisflow_getDefaultSettings(PyObject*, PyObject*)
+{
+    // The factory defaults, in the same shape as getSettings() (minus hotkeys,
+    // which reset through resetHotkeys()). The settings dialog uses this for
+    // its per-section "Restore defaults" button: it writes back only the keys
+    // of the section the user is on, instead of resetting everything.
+    PyObject* d = PyDict_New();
+    if (!d) return nullptr;
+
+    auto setItem = [d](const char* k, PyObject* v) {
+        if (v) { PyDict_SetItemString(d, k, v); Py_DECREF(v); }
+    };
+    using D = AxisFlowDefaults;
+
+    setItem("compassSize",      PyLong_FromLong(D::compassSize));
+    setItem("axisThickness",    PyLong_FromLong(D::axisThickness));
+    setItem("axisStartPct",     PyFloat_FromDouble(D::axisStartPct));
+    setItem("axisLengthPct",    PyFloat_FromDouble(D::axisLengthPct));
+    setItem("axisColorX",       PyLong_FromUnsignedLong(D::axisColorX));
+    setItem("axisColorY",       PyLong_FromUnsignedLong(D::axisColorY));
+    setItem("activeFieldColor", PyLong_FromUnsignedLong(D::activeFieldColor));
+    setItem("fillTransparency", PyFloat_FromDouble(D::fillTransparency));
+    setItem("alwaysShowCompass", PyBool_FromLong(D::alwaysShowCompass ? 1 : 0));
+
+    setItem("liveLineEnabled",  PyBool_FromLong(D::liveLineEnabled ? 1 : 0));
+    setItem("liveLineStyle",    PyLong_FromLong(D::liveLineStyle));
+    setItem("liveLineColor",    PyLong_FromUnsignedLong(D::liveLineColor));
+    setItem("compassPathEnabled", PyBool_FromLong(D::compassPathEnabled ? 1 : 0));
+    setItem("compassPathStyle",   PyLong_FromLong(D::compassPathStyle));
+    setItem("compassPathColor",   PyLong_FromUnsignedLong(D::compassPathColor));
+    setItem("liveLineTransparency", PyFloat_FromDouble(D::liveLineTransparency));
+
+    setItem("useDistanceIndexing", PyBool_FromLong(D::useDistanceIndexing ? 1 : 0));
+    setItem("useAxesIndexing",     PyBool_FromLong(D::useAxesIndexing ? 1 : 0));
+    setItem("indexingTolerance",   PyLong_FromLong(D::indexingTolerance));
+    setItem("indexingAxisWeight",  PyLong_FromLong(D::indexingAxisWeight));
+    setItem("indexingAxisTransparency", PyFloat_FromDouble(D::indexingAxisTransparency));
+
+    setItem("useSnapping",            PyBool_FromLong(D::useSnapping ? 1 : 0));
+    setItem("smartNegativeDirection", PyBool_FromLong(D::smartNegativeDirection ? 1 : 0));
+    setItem("focusAdvanceOnMove",     PyBool_FromLong(D::focusAdvanceOnMove ? 1 : 0));
+    setItem("compassFollowDirection", PyLong_FromLong(D::compassFollowDirection));
+    setItem("compassRotateAnimation", PyFloat_FromDouble(D::compassRotateAnimation));
+
     return d;
 }
 
@@ -588,6 +728,10 @@ PyObject* axisflow_setSetting(PyObject*, PyObject* args)
     else if (k == "alwaysShowCompass") s.setAlwaysShowCompass(PyObject_IsTrue(val) == 1);
     else if (k == "liveLineEnabled")   s.setLiveLineEnabled(PyObject_IsTrue(val) == 1);
     else if (k == "liveLineStyle")     s.setLiveLineStyle(static_cast<int>(PyLong_AsLong(val)));
+    else if (k == "compassPathEnabled") s.setCompassPathEnabled(PyObject_IsTrue(val) != 0);
+    else if (k == "compassPathStyle")   s.setCompassPathStyle(static_cast<int>(PyLong_AsLong(val)));
+    else if (k == "compassPathColor")   s.setCompassPathColor(
+                                            static_cast<unsigned long>(PyLong_AsUnsignedLong(val)));
     else if (k == "liveLineColor")     s.setLiveLineColor(PyLong_AsUnsignedLong(val));
     else if (k == "useDistanceIndexing") s.setUseDistanceIndexing(PyObject_IsTrue(val) == 1);
     else if (k == "useAxesIndexing")     s.setUseAxesIndexing(PyObject_IsTrue(val) == 1);
@@ -681,9 +825,13 @@ PyMethodDef AxisFlowMethods[] = {
     {"beginSession",   axisflow_beginSession,   METH_NOARGS,
      "beginSession() -> bool. Activate AxisFlow and show compass+panel on the active view."},
     {"getPoint",       (PyCFunction)(void*)axisflow_getPoint, METH_VARARGS | METH_KEYWORDS,
-     "getPoint(callback=None, movecallback=None, last=None, continuous=False, finishcallback=None).\n"
+     "getPoint(callback=None, movecallback=None, last=None, continuous=False, "
+     "finishcallback=None, modecallback=None).\n"
      "callback(point, ok): point is a Base.Vector (ok=True) or None (cancel, ok=False).\n"
      "movecallback(point): live point on every cursor move.\n"
+     "modecallback(): the ToggleSegmentMode key was pressed. AxisFlow gives it no\n"
+     "  meaning of its own -- the consumer decides what the mode is (the line demo\n"
+     "  switches the next segment between a straight line and an arc).\n"
      "finishcallback(): FinishLine/Escape fired; finish the current line, session keeps running.\n"
      "continuous=False fires once; True fires per point until cancel."},
     {"endSession",     axisflow_endSession,     METH_NOARGS,
@@ -705,6 +853,8 @@ PyMethodDef AxisFlowMethods[] = {
      "|'clearlocks'|'cancelentry'|'cancelcommand'|'finishline'|'confirmpoint'|'none'[, persist=True])."},
     {"confirm",        axisflow_confirm,        METH_VARARGS,
      "confirm(point). Commit a point as the new compass origin."},
+    {"setBasePoint",   axisflow_setBasePoint,   METH_VARARGS,
+     "setBasePoint(vector) -- move the compass anchor without confirming a point."},
     {"setPlane",       axisflow_setPlane,       METH_VARARGS,
      "setPlane(u, v, normal). Set compass/working-plane orientation."},
     {"resetPlane",     axisflow_resetPlane,     METH_NOARGS,
@@ -733,10 +883,13 @@ PyMethodDef AxisFlowMethods[] = {
      "getState() -> dict. Snapshot of the current AxisFlow state."},
     {"getSettings",    axisflow_getSettings,    METH_NOARGS,
      "getSettings() -> dict. All persistent options plus the 'hotkeys' map."},
+    {"getDefaultSettings", axisflow_getDefaultSettings, METH_NOARGS,
+     "getDefaultSettings() -> dict -- the factory defaults, same keys as getSettings()"},
     {"setSetting",     axisflow_setSetting,     METH_VARARGS,
      "setSetting(name, value). name in {compassSize, axisThickness, axisStartPct, "
      "axisLengthPct, axisColorX, axisColorY, activeFieldColor, fillTransparency, "
      "alwaysShowCompass, liveLineEnabled, liveLineStyle, liveLineColor, "
+     "compassPathEnabled, compassPathStyle, compassPathColor, "
      "liveLineTransparency, useDistanceIndexing, useAxesIndexing, indexingTolerance, "
      "indexingAxisWeight, indexingAxisTransparency}."},
     {"resetSettings",  axisflow_resetSettings,  METH_NOARGS,

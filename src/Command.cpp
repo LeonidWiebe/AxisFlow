@@ -1,5 +1,7 @@
 #include "PreCompiled.h"
 
+#include <QtCore/QObject>
+
 #ifdef FC_OS_WIN32
 # include <windows.h>
 #endif
@@ -13,6 +15,7 @@
 #include <Gui/View3DInventor.h>
 
 #include "AxisFlowTool.h"
+#include "AxisFlowService.h"
 #include "AxisFlowSettings.h"
 
 // ---------------------------------------------------------------------------
@@ -56,12 +59,36 @@ void CmdAxisFlowActivate::activated(int)
         return;
     }
 
-    if (_tool && _tool->isActive()) {
-        _tool->deactivate();
+    // Look at the session that is actually live, not just at our own pointer.
+    // A running getPoint (the line command) owns a tool of its own, and the
+    // button used to miss it entirely: the first press built a SECOND tool on
+    // the same view, so it looked dead, and the second press switched that one
+    // off. Toggling off now means "end whatever AxisFlow is doing".
+    if (AxisFlowGui::AxisFlowTool* live = AxisFlowGui::AxisFlowTool::current()) {
+        // Tell a getPoint consumer first, through the same channel its cancel
+        // key uses, so it can commit or abort its own geometry and drop its
+        // scratch objects. Its teardown normally deactivates the tool; if
+        // nobody was listening, we do it ourselves.
+        AxisFlowGui::AxisFlowService::instance()
+            .performAction(AxisFlowGui::AxisAction::CancelCommand);
+        if (live == AxisFlowGui::AxisFlowTool::current() && live->isActive())
+            live->deactivate();
     } else {
         if (!_tool || _tool->parent() != view) {
             delete _tool;
             _tool = new AxisFlowGui::AxisFlowTool(view, view);
+            // The tool is a CHILD of the view, so closing the document deletes
+            // it. This command object outlives every view, so without clearing
+            // the pointer it would be left aiming at freed memory -- and the
+            // next click on the button read it. The identity check matters:
+            // a queued destruction of an OLD tool must not null a new one.
+            // No context object: Gui::Command is not a QObject, and it outlives
+            // the tool anyway, so capturing `this` is safe here.
+            QObject::connect(_tool, &QObject::destroyed,
+                             [this](QObject* obj) {
+                                 if (static_cast<QObject*>(_tool) == obj)
+                                     _tool = nullptr;
+                             });
         }
         _tool->activate();
     }

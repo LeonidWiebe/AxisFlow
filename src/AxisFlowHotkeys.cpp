@@ -4,6 +4,8 @@
 
 #include <QtGui/QKeyEvent>   // for Qt::Key_* codes
 
+#include <set>
+
 namespace AxisFlowGui {
 
 Hotkeys::Hotkeys()
@@ -15,44 +17,57 @@ void Hotkeys::setDefaults()
 {
     _map.clear();
 
-    // AxisFlow owns the keyboard inside its OWN tools (the Coin event callback
-    // is the key source there), so the full AccuDraw-flavoured layout is the
-    // default. The optional Draft adapter unbinds what Draft needs (X/Y/Z are
-    // Draft's RestrictX/Y/Z, Enter/Escape are its commit/abort) by calling
-    // setHotkey(code, 'none') at install time.
+    // AxisFlow owns the keyboard inside its OWN tools, so the full
+    // AccuDraw-flavoured layout is the default. The optional Draft adapter
+    // unbinds what Draft needs (X/Y/Z are Draft's RestrictX/Y/Z, Enter/Escape
+    // are its commit/abort) by calling setHotkey(code, 'none') at install time.
     // Mirrors hotkeys.ini (that file is layer 2 on top of this fallback).
-    _map[Qt::Key_Space]  = AxisAction::ToggleMode;   // ortho <-> radial
-    _map[Qt::Key_P]      = AxisAction::ConfirmPoint; // place the point
-    _map[Qt::Key_Return] = AxisAction::SmartLock;    // constrain to the nearest axis
-    _map[Qt::Key_Enter]  = AxisAction::SmartLock;    // numpad Enter
-    _map[Qt::Key_X]      = AxisAction::LockX;
-    _map[Qt::Key_Y]      = AxisAction::LockY;
-    _map[Qt::Key_Z]      = AxisAction::LockZ;
-    _map[Qt::Key_D]      = AxisAction::LockD;   // polar: freeze the distance
-    _map[Qt::Key_O]      = AxisAction::SetOrigin;
-    _map[Qt::Key_T]      = AxisAction::RotateTop;
-    _map[Qt::Key_F]      = AxisAction::RotateFront;
-    _map[Qt::Key_S]      = AxisAction::RotateSide;
-    _map[Qt::Key_V]      = AxisAction::RotateByView;
-    _map[Qt::Key_E]      = AxisAction::RotateCycle;
-    _map[Qt::Key_Escape]   = AxisAction::FinishLine;     // finish the current line, keep going
-    _map[Qt::Key_QuoteLeft] = AxisAction::CancelCommand; // backtick ` ends the whole command
+    auto single = [this](int k, AxisAction a) { _map[KeyChord{k, 0}] = a; };
+
+    single(Qt::Key_Space,  AxisAction::ToggleMode);    // ortho <-> radial
+    single(Qt::Key_P,      AxisAction::ConfirmPoint);  // place the point
+    single(Qt::Key_Return, AxisAction::SmartLock);     // nearest-axis constraint
+    single(Qt::Key_Enter,  AxisAction::SmartLock);     // numpad Enter
+    single(Qt::Key_X,      AxisAction::LockX);
+    single(Qt::Key_Y,      AxisAction::LockY);
+    single(Qt::Key_Z,      AxisAction::LockZ);
+    single(Qt::Key_D,      AxisAction::LockD);   // polar: freeze the distance
+    single(Qt::Key_O,      AxisAction::SetOrigin);
+    single(Qt::Key_T,      AxisAction::RotateTop);
+    single(Qt::Key_F,      AxisAction::RotateFront);
+    single(Qt::Key_S,      AxisAction::RotateSide);
+    single(Qt::Key_V,      AxisAction::RotateByView);
+    single(Qt::Key_E,      AxisAction::RotateCycle);
+    // M, as in Sketcher's polyline tool, where the same key cycles the mode of
+    // the next segment.
+    single(Qt::Key_M,      AxisAction::ToggleSegmentMode);
+    single(Qt::Key_Escape,     AxisAction::FinishLine);     // finish the line, keep going
+    single(Qt::Key_QuoteLeft,  AxisAction::CancelCommand);  // backtick ends the command
+
+    // Two-key chords. R is therefore a PREFIX and must not carry a single
+    // binding of its own (see the prefix rule in the header).
+    _map[KeyChord{Qt::Key_R, Qt::Key_X}] = AxisAction::RotateAboutX;
+    _map[KeyChord{Qt::Key_R, Qt::Key_Y}] = AxisAction::RotateAboutY;
+    _map[KeyChord{Qt::Key_R, Qt::Key_Z}] = AxisAction::RotateAboutZ;
+
     // ToggleActive / CancelEntry / ClearLocks have no default key: bind via the
     // dialog, hotkeys.ini or setHotkey. Clear a typed value with Backspace, a
     // lock by pressing its key again.
 }
 
-void Hotkeys::set(int qtKey, AxisAction a)
+void Hotkeys::set(KeyChord c, AxisAction a)
 {
+    if (!c.valid())
+        return;
     if (a == AxisAction::None)
-        _map.erase(qtKey);
+        _map.erase(c);
     else
-        _map[qtKey] = a;
+        _map[c] = a;
 }
 
-void Hotkeys::remove(int qtKey)
+void Hotkeys::remove(KeyChord c)
 {
-    _map.erase(qtKey);
+    _map.erase(c);
 }
 
 void Hotkeys::clear()
@@ -60,50 +75,108 @@ void Hotkeys::clear()
     _map.clear();
 }
 
-AxisAction Hotkeys::action(int qtKey) const
+AxisAction Hotkeys::action(KeyChord c) const
 {
-    auto it = _map.find(qtKey);
+    auto it = _map.find(c);
     return (it == _map.end()) ? AxisAction::None : it->second;
 }
 
-int Hotkeys::keyFor(AxisAction a) const
+bool Hotkeys::isPrefix(int qtKey) const
+{
+    if (qtKey == 0)
+        return false;
+    for (const auto& kv : _map) {
+        if (kv.first.isChord() && kv.first.first == qtKey)
+            return true;
+    }
+    return false;
+}
+
+std::vector<std::pair<int, AxisAction>> Hotkeys::continuations(int prefix) const
+{
+    std::vector<std::pair<int, AxisAction>> out;
+    if (prefix == 0)
+        return out;
+    // std::map order already sorts by {first, second}, so the seconds come out
+    // ascending -- the panel shows them in a stable order.
+    for (const auto& kv : _map) {
+        if (kv.first.isChord() && kv.first.first == prefix)
+            out.emplace_back(kv.first.second, kv.second);
+    }
+    return out;
+}
+
+KeyChord Hotkeys::chordFor(AxisAction a) const
 {
     for (const auto& kv : _map) {
         if (kv.second == a)
             return kv.first;
     }
-    return 0;   // unbound
+    return KeyChord{};
 }
 
-std::vector<int> Hotkeys::keysFor(AxisAction a) const
+std::vector<KeyChord> Hotkeys::chordsFor(AxisAction a) const
 {
-    std::vector<int> keys;
+    std::vector<KeyChord> out;
     for (const auto& kv : _map) {
         if (kv.second == a)
-            keys.push_back(kv.first);
+            out.push_back(kv.first);
     }
-    return keys;
+    return out;
 }
 
-void Hotkeys::bind(AxisAction a, const std::vector<int>& keys)
+bool Hotkeys::consistent(const std::map<KeyChord, AxisAction>& m)
+{
+    // The prefix rule: no key may be both a single binding and the first key of
+    // a chord. Collect both sets, then intersect.
+    std::set<int> singles;
+    std::set<int> prefixes;
+    for (const auto& kv : m) {
+        if (kv.first.isChord()) prefixes.insert(kv.first.first);
+        else                    singles.insert(kv.first.first);
+    }
+    for (int k : prefixes) {
+        if (singles.count(k))
+            return false;
+    }
+    return true;
+}
+
+bool Hotkeys::canBind(AxisAction a, const std::vector<KeyChord>& keys) const
 {
     if (a == AxisAction::None)
-        return;
+        return false;
 
-    // Drop every previous key of this action, so an action never ends up bound
-    // to a stale key that the settings no longer know about.
+    // Build the map this binding would produce and check the rule on it.
+    std::map<KeyChord, AxisAction> candidate = _map;
+    for (auto it = candidate.begin(); it != candidate.end(); ) {
+        if (it->second == a) it = candidate.erase(it);
+        else                 ++it;
+    }
+    for (const KeyChord& c : keys) {
+        if (!c.valid())
+            return false;
+        candidate[c] = a;      // assigning a key held by another action moves it
+    }
+    return consistent(candidate);
+}
+
+bool Hotkeys::bind(AxisAction a, const std::vector<KeyChord>& keys)
+{
+    if (!canBind(a, keys))
+        return false;
+
+    // Drop the action's previous keys first: this is a REPLACE, which is what
+    // keeps the live map in step with the settings (they store one key list per
+    // action).
     for (auto it = _map.begin(); it != _map.end(); ) {
         if (it->second == a) it = _map.erase(it);
         else                 ++it;
     }
-    for (int k : keys) {
-        if (k > 0) _map[k] = a;
-    }
+    for (const KeyChord& c : keys)
+        _map[c] = a;
+    return true;
 }
-
-// ---------------------------------------------------------------------------
-// Names: stable identifiers used as settings keys ("Hotkey.LockX").
-// ---------------------------------------------------------------------------
 
 const char* Hotkeys::name(AxisAction a)
 {
@@ -121,6 +194,10 @@ const char* Hotkeys::name(AxisAction a)
     case AxisAction::RotateSide:   return "RotateSide";
     case AxisAction::RotateByView: return "RotateByView";
     case AxisAction::RotateCycle:  return "RotateCycle";
+    case AxisAction::RotateAboutX: return "RotateAboutX";
+    case AxisAction::RotateAboutY: return "RotateAboutY";
+    case AxisAction::RotateAboutZ: return "RotateAboutZ";
+    case AxisAction::ToggleSegmentMode: return "ToggleSegmentMode";
     case AxisAction::ClearLocks:   return "ClearLocks";
     case AxisAction::CancelEntry:  return "CancelEntry";
     case AxisAction::CancelCommand:return "CancelCommand";
@@ -155,6 +232,10 @@ const std::vector<AxisAction>& Hotkeys::allActions()
         AxisAction::RotateSide,
         AxisAction::RotateByView,
         AxisAction::RotateCycle,
+        AxisAction::RotateAboutX,
+        AxisAction::RotateAboutY,
+        AxisAction::RotateAboutZ,
+        AxisAction::ToggleSegmentMode,
         AxisAction::ClearLocks,
         AxisAction::CancelEntry,
         AxisAction::CancelCommand,

@@ -45,7 +45,24 @@ struct IndexingInput {
     bool   useDistance;         // distance indexing enabled (setting)
     bool   useAxis;             // axis indexing enabled (setting)
     bool   localFrame;          // true only in the local (compass) frame
-    bool   axisLocked;          // an explicit axis lock is active (X/Y/Z)
+
+    // Axis indexing collapses ONE in-plane component to zero, so it may only
+    // run when that component is FREE. This is decided per axis, not globally:
+    //   the X axis (ly -> 0) needs the V slot free,
+    //   the Y axis (lx -> 0) needs the U slot free.
+    // Freezing X therefore leaves X-axis indexing working -- which is the whole
+    // point of freezing X and then sliding along it. A blanket "any lock kills
+    // axis indexing" gate used to live here and made the feature disappear the
+    // moment a field was frozen by hotkey.
+    // "Fixed" means the slot holds a value, whether typed or locked: indexing
+    // must not overwrite a typed coordinate either.
+    bool   fixedU { false };    // in-plane U (X) coordinate is fixed
+    bool   fixedV { false };    // in-plane V (Y) coordinate is fixed
+    bool   fixedN { false };    // normal (Z) coordinate is fixed
+    /** Axis indexing cannot run at all: in radial mode a projection onto an
+     *  axis changes BOTH the distance and the angle, so a fixed distance or
+     *  angle rules it out wholesale. */
+    bool   blockAxisIndexing { false };
     bool   entryActive;         // a coordinate is being typed into a field
     bool   snapActive;          // an object snap (endpoint/midpoint/...) is live
 
@@ -108,36 +125,44 @@ inline IndexingResult computeIndexing(const IndexingInput& in)
     // the snapped point onto that axis. That is the classic way of taking a
     // distance from existing geometry while staying on the axis.
     if (in.snapActive) {
-        if (!in.useAxis || in.axisLocked)
+        const bool mayX = !in.fixedV;     // collapsing onto X moves ly
+        const bool mayY = !in.fixedU;     // collapsing onto Y moves lx
+        if (!in.useAxis || in.blockAxisIndexing || (!mayX && !mayY))
             return r;                     // point stays exactly on the snap
 
         // Which axis was the CURSOR hugging? (the snapped point may be far off)
         const double distToX = std::fabs(in.cursorLy);
         const double distToY = std::fabs(in.cursorLx);
-        const bool   nearX   = (distToX <= distToY);
+        const bool   nearX   = (mayX && mayY) ? (distToX <= distToY) : mayX;
         const double perpPx  = (nearX ? distToX : distToY) / in.worldPerPixel;
         r.axisOffsetPx = perpPx;
         if (perpPx > tol)
             return r;                     // cursor was not on an axis: plain snap
 
         // Perpendicular projection of the snapped point onto that axis line:
-        // both other components collapse.
+        // the other components collapse -- except any that is fixed, which
+        // stays where the lock or the typed value put it.
         r.axisActive = true;
         r.axis = nearX ? IndexAxis::X : IndexAxis::Y;
-        if (nearX) { r.ly = 0.0; r.lz = 0.0; }
-        else       { r.lx = 0.0; r.lz = 0.0; }
+        if (nearX) r.ly = 0.0;
+        else       r.lx = 0.0;
+        if (!in.fixedN)
+            r.lz = 0.0;
         r.kind = IndexKind::Axis;
         return r;
     }
 
     // ---- Axis indexing: perpendicular-project onto the nearest axis --------
     // Distance to the X axis (line y=0) is |ly|; to the Y axis (line x=0) is
-    // |lx|. Skipped when an explicit lock is active (already on an axis, so the
-    // candidate would fire constantly and just duplicate the lock).
-    if (in.useAxis && !in.axisLocked) {
+    // |lx|. Only the axes whose collapse touches a FREE component are
+    // candidates, so freezing one coordinate leaves the other axis usable
+    // instead of switching the feature off.
+    const bool mayX = in.useAxis && !in.blockAxisIndexing && !in.fixedV;
+    const bool mayY = in.useAxis && !in.blockAxisIndexing && !in.fixedU;
+    if (mayX || mayY) {
         const double distToX = std::fabs(r.ly);   // perpendicular to X axis
         const double distToY = std::fabs(r.lx);   // perpendicular to Y axis
-        const bool   nearX   = (distToX <= distToY);
+        const bool   nearX   = (mayX && mayY) ? (distToX <= distToY) : mayX;
         const double perp    = nearX ? distToX : distToY;
         const double perpPx  = perp / in.worldPerPixel;
         r.axisOffsetPx = perpPx;

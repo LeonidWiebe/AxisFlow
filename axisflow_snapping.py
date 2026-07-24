@@ -75,6 +75,17 @@ def snap(x, y, ox, oy, oz, has_origin):
         if pt is None:
             return (0.0, 0.0, 0.0, 0)
 
+        # noTracker=True is not enough. Draft honours it only on the path where
+        # NOTHING was snapped; when a snap actually wins, Snapper.snapToObject()
+        # switches trackLine on unconditionally -- it is not even passed the
+        # flag (see gui_snapper.py, "# setting the trackline"). The result is a
+        # second line, in Draft's default line colour, drawn from lastpoint to
+        # the snapped point, right on top of AxisFlow's own guide and compass
+        # path. Switching it off here is explicit and survives Draft changing
+        # its mind about the flag. It does NOT touch snapper.tracker, the snap
+        # marker we read below to tell whether a snap happened.
+        _hide_track_line(snapper)
+
         # snap() also returns a point when nothing was snapped (the cursor
         # projected on the working plane), so the return value alone cannot
         # tell us whether a snap happened. The snap marker is the reliable
@@ -100,11 +111,23 @@ def snap(x, y, ox, oy, oz, has_origin):
         return (0.0, 0.0, 0.0, 0)
 
 
+def _hide_track_line(snapper):
+    """Switch off Draft's own track line (see the note in snap())."""
+    track = getattr(snapper, "trackLine", None)
+    if track is None:
+        return
+    try:
+        track.off()
+    except Exception:
+        pass
+
+
 def hide():
     """Hide snap markers/trackers; called when an AxisFlow tool ends."""
     snapper = getattr(Gui, "Snapper", None)
     if snapper is None:
         return
+    _hide_track_line(snapper)
     try:
         snapper.off()
     except Exception:

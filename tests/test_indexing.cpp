@@ -27,7 +27,8 @@ IndexingInput mk(double lx, double ly, double lz)
     in.useDistance = false;
     in.useAxis = false;
     in.localFrame = true;
-    in.axisLocked = false;
+    in.fixedU = in.fixedV = in.fixedN = false;
+    in.blockAxisIndexing = false;
     in.entryActive = false;
     in.snapActive = false;
     return in;
@@ -89,11 +90,82 @@ TEST(Indexing, AxisDoesNotSnapOutsideTolerance)
     EXPECT_DOUBLE_EQ(r.ly, 20.0);
 }
 
-TEST(Indexing, AxisSuppressedWhenExplicitlyLocked)
+TEST(Indexing, FixingACoordinateOnlySuppressesTheAxisThatWouldMoveIt)
+{
+    // Riding the X axis means collapsing ly, so it needs the Y slot free.
+    // Freezing Y (its own slot) is what rules it out -- freezing X does not.
+    IndexingInput in = mk(100, 0, 0);
+    in.useAxis = true;
+    in.fixedV = true;
+    EXPECT_FALSE(computeIndexing(in).axisActive);
+}
+
+TEST(Indexing, FreezingXLeavesXAxisIndexingWorking)
+{
+    // Regression: freezing a field by hotkey used to switch axis indexing off
+    // wholesale, so sliding along the frozen axis lost its snap. The frozen
+    // coordinate is not the one the X axis collapses.
+    IndexingInput in = mk(100, 0.5, 0);   // x fixed at 100, y nearly zero
+    in.useAxis = true;
+    in.fixedU = true;                     // X frozen (by lock or by typing)
+    const IndexingResult r = computeIndexing(in);
+    EXPECT_TRUE(r.axisActive);
+    EXPECT_EQ(r.axis, IndexAxis::X);
+    EXPECT_DOUBLE_EQ(r.ly, 0.0);          // collapsed, as it should
+    EXPECT_DOUBLE_EQ(r.lx, 100.0);        // the frozen coordinate is untouched
+}
+
+TEST(Indexing, FreezingYLeavesYAxisIndexingWorking)
+{
+    IndexingInput in = mk(0.5, 100, 0);
+    in.useAxis = true;
+    in.fixedV = true;                     // Y frozen
+    const IndexingResult r = computeIndexing(in);
+    EXPECT_TRUE(r.axisActive);
+    EXPECT_EQ(r.axis, IndexAxis::Y);
+    EXPECT_DOUBLE_EQ(r.lx, 0.0);
+    EXPECT_DOUBLE_EQ(r.ly, 100.0);
+}
+
+TEST(Indexing, TheAllowedAxisWinsEvenWhenTheOtherIsNearer)
+{
+    // X frozen: the Y axis is nearer, but collapsing onto it would overwrite
+    // the frozen coordinate, so the X axis is the only candidate.
+    IndexingInput in = mk(0.2, 2.0, 0);   // nearer to the Y axis (|lx| < |ly|)
+    in.useAxis = true;
+    in.fixedU = true;
+    const IndexingResult r = computeIndexing(in);
+    EXPECT_TRUE(r.axisActive);
+    EXPECT_EQ(r.axis, IndexAxis::X);
+    EXPECT_DOUBLE_EQ(r.lx, 0.2);          // untouched
+    EXPECT_DOUBLE_EQ(r.ly, 0.0);
+}
+
+TEST(Indexing, FreezingBothInPlaneFieldsSuppressesAxisIndexing)
 {
     IndexingInput in = mk(100, 0, 0);
-    in.useAxis = true; in.axisLocked = true;
+    in.useAxis = true;
+    in.fixedU = in.fixedV = true;
     EXPECT_FALSE(computeIndexing(in).axisActive);
+}
+
+TEST(Indexing, RadialLockBlocksAxisIndexingWholesale)
+{
+    // A projection onto an axis changes both distance and angle.
+    IndexingInput in = mk(100, 0, 0);
+    in.useAxis = true;
+    in.blockAxisIndexing = true;
+    EXPECT_FALSE(computeIndexing(in).axisActive);
+}
+
+TEST(Indexing, ATypedCoordinateIsProtectedLikeALock)
+{
+    // "Fixed" covers typed values too: indexing must not overwrite a number
+    // the user entered.
+    IndexingInput in = mk(0.2, 2.0, 0);
+    in.useAxis = true;
+    in.fixedU = true;          // set from hasValueX(), lock bit or not
+    EXPECT_DOUBLE_EQ(computeIndexing(in).lx, 0.2);
 }
 
 TEST(Indexing, AxisToleranceScalesWithZoom)
@@ -359,7 +431,8 @@ TEST(Indexing, LockedOnAxisLightsTheCandidateEvenWithIndexingDisabled)
     in.tolerancePx = 0; in.worldPerPixel = 0.0;   // indexing globally off
     in.useDistance = false; in.useAxis = false;
     in.localFrame = false;                        // even in the world frame
-    in.axisLocked = true; in.entryActive = false;
+    in.fixedU = in.fixedV = in.fixedN = false;
+    in.blockAxisIndexing = true; in.entryActive = false;
     in.snapActive = false;
     in.lockedOnAxisX = true;                      // lock feedback still shows
     const IndexingResult r = computeIndexing(in);
@@ -382,4 +455,62 @@ TEST(SolverIndexing, LockCandidateAxisSurvivesASnap)
     EXPECT_DOUBLE_EQ(p.x, 30.0);        // snapped x survives, y/z stay frozen
     EXPECT_DOUBLE_EQ(p.y, 0.0);
     EXPECT_DOUBLE_EQ(p.z, 0.0);
+}
+
+// ---- freezing a field must not switch axis indexing off -------------------
+
+TEST(SolverIndexing, LockingXKeepsXAxisIndexingAlive)
+{
+    // The reported bug: freeze X with the hotkey, slide along it, and the axis
+    // snap was gone. Freezing X pins lx; riding the X axis collapses ly, which
+    // is a different slot, so it must still fire.
+    AxisFlowSolver s;
+    s.setViewScale(0.1);                // 0.1 world units per pixel
+    s.setIndexTolerancePx(15);
+    s.setUseAxisIndexing(true);
+    s.setLocalFrame(true);
+    s.setRawPoint(V(100, 0.5, 0));      // 5 px off the X axis
+    s.lockValueX(100.0);                // frozen by hotkey
+
+    const IndexingResult r = s.indexing();
+    EXPECT_TRUE(r.axisActive);
+    EXPECT_EQ(r.axis, IndexAxis::X);
+
+    const Base::Vector3d p = s.getSolvedPoint();
+    EXPECT_DOUBLE_EQ(p.x, 100.0);       // the frozen coordinate is untouched
+    EXPECT_DOUBLE_EQ(p.y, 0.0);         // ... and the free one snapped
+}
+
+TEST(SolverIndexing, LockingYKeepsYAxisIndexingAlive)
+{
+    AxisFlowSolver s;
+    s.setViewScale(0.1);
+    s.setIndexTolerancePx(15);
+    s.setUseAxisIndexing(true);
+    s.setLocalFrame(true);
+    s.setRawPoint(V(0.5, 100, 0));
+    s.lockValueY(100.0);
+
+    const IndexingResult r = s.indexing();
+    EXPECT_TRUE(r.axisActive);
+    EXPECT_EQ(r.axis, IndexAxis::Y);
+
+    const Base::Vector3d p = s.getSolvedPoint();
+    EXPECT_DOUBLE_EQ(p.x, 0.0);
+    EXPECT_DOUBLE_EQ(p.y, 100.0);
+}
+
+TEST(SolverIndexing, ATypedXIsNotOverwrittenByAxisIndexing)
+{
+    // Same protection for a typed value: indexing may not zero it.
+    AxisFlowSolver s;
+    s.setViewScale(0.1);
+    s.setIndexTolerancePx(15);
+    s.setUseAxisIndexing(true);
+    s.setLocalFrame(true);
+    s.setRawPoint(V(0.2, 2.0, 0));      // nearer the Y axis
+    s.setValueX(0.2);                   // typed, not locked
+
+    const Base::Vector3d p = s.getSolvedPoint();
+    EXPECT_DOUBLE_EQ(p.x, 0.2);         // survives
 }

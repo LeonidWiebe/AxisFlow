@@ -246,6 +246,91 @@ class TestAxisFlowApi(unittest.TestCase):
         p = AF.solve(_v(100, 3, 5))
         self.assertAlmostEqual(p.y, 3.0)   # not snapped onto the X axis
 
+    def test_default_settings_match_the_live_keys(self):
+        """getDefaultSettings() must cover exactly what getSettings() exposes,
+        or the dialog's per-section restore would silently skip options."""
+        live = set(AF.getSettings().keys()) - {'hotkeys'}
+        self.assertEqual(set(AF.getDefaultSettings().keys()), live)
+
+    def test_default_settings_are_accepted_by_set_setting(self):
+        """Every default must round-trip: the restore button writes them back."""
+        defaults = AF.getDefaultSettings()
+        before = AF.getSettings()
+        try:
+            for key, value in defaults.items():
+                AF.setSetting(key, value)
+            after = AF.getSettings()
+            for key, value in defaults.items():
+                if isinstance(value, float):
+                    self.assertAlmostEqual(float(after[key]), float(value), places=3)
+                else:
+                    self.assertEqual(type(value)(after[key]), value, key)
+        finally:
+            for key, value in before.items():
+                if key != 'hotkeys':
+                    AF.setSetting(key, value)
+
+    def test_set_base_point_moves_the_origin(self):
+        """setBasePoint moves the compass anchor without confirming a point."""
+        AF.beginSession()
+        try:
+            AF.setBasePoint(_v(3, 4, 5))
+            o = AF.getState()['origin']
+            self.assertAlmostEqual(o.x, 3.0)
+            self.assertAlmostEqual(o.y, 4.0)
+            self.assertAlmostEqual(o.z, 5.0)
+        finally:
+            AF.endSession()
+
+    def test_set_base_point_without_a_session_raises(self):
+        AF.endSession()
+        with self.assertRaises(RuntimeError):
+            AF.setBasePoint(_v(1, 2, 3))
+
+    # -- two-key chords ----------------------------------------------------
+    # Qt key codes spelled out: QtCore is not imported in this module.
+    _KEY_G = 0x47
+    _KEY_L = 0x4C
+
+    @staticmethod
+    def _as_list(codes):
+        """Normalise a hotkey list: chords arrive as nested pairs."""
+        return [list(c) if isinstance(c, (list, tuple)) else c for c in (codes or [])]
+
+    def test_chord_defaults_are_pairs(self):
+        hk = AF.getSettings()['hotkeys']
+        for name in ('RotateAboutX', 'RotateAboutY', 'RotateAboutZ'):
+            binding = self._as_list(hk.get(name))
+            self.assertEqual(len(binding), 1, name)
+            self.assertEqual(len(binding[0]), 2, name)
+
+    def test_chord_prefix_is_never_also_a_single_key(self):
+        # The rule that makes a chord resolvable without a timeout.
+        hk = AF.getSettings()['hotkeys']
+        prefixes, singles = set(), set()
+        for codes in hk.values():
+            for c in self._as_list(codes):
+                if isinstance(c, list):
+                    prefixes.add(c[0])
+                else:
+                    singles.add(c)
+        self.assertEqual(prefixes & singles, set())
+
+    def test_binding_a_prefix_as_a_single_key_is_refused(self):
+        hk = AF.getSettings()['hotkeys']
+        prefix = self._as_list(hk['RotateAboutX'])[0][0]
+        with self.assertRaises(ValueError):
+            AF.setHotkeys('ClearLocks', [prefix], False)
+
+    def test_chord_roundtrips_through_the_api(self):
+        before = self._as_list(AF.getSettings()['hotkeys'].get('ClearLocks'))
+        try:
+            AF.setHotkeys('ClearLocks', [[self._KEY_G, self._KEY_L]], False)
+            got = self._as_list(AF.getSettings()['hotkeys']['ClearLocks'])
+            self.assertEqual(got, [[self._KEY_G, self._KEY_L]])
+        finally:
+            AF.setHotkeys('ClearLocks', before, False)
+
 
 @unittest.skipIf(AF is None, "AxisFlow not importable (needs a GUI FreeCAD build)")
 class TestAxisFlowSessionGui(unittest.TestCase):

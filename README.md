@@ -1,6 +1,6 @@
 # AxisFlow Workbench for FreeCAD
 
-version 0.1.3 (alpha)
+version 0.2.0 (alpha)
 
 **AxisFlow** is a precision drawing assistant for FreeCAD, inspired by the workflow concept of **MicroStation AccuDraw**.
 
@@ -24,7 +24,7 @@ The project is inspired by the principles behind MicroStation AccuDraw, adapted 
 
 AxisFlow is a reusable **coordinate-input module**, not a drawing workbench.
 
-It supplies the input half of a drawing tool: the compass anchored at a reference point, ortho and radial modes, coordinate-field locks (freeze X, Y, Z or the polar distance/angle), a smart lock that constrains movement to the nearest axis, unit-aware value entry, a configurable key map, and a confirmed point. **AxisFlow never creates document objects.** No lines, no shapes. What to build from the points it hands back is entirely the consumer's decision.
+It supplies the input half of a drawing tool: the compass anchored at a reference point, ortho and radial modes, coordinate-field locks (freeze X, Y, Z or the polar distance/angle), a smart lock that constrains movement to the nearest axis, numeric value entry, a configurable key map, and a confirmed point. **AxisFlow never creates document objects.** No lines, no shapes. What to build from the points it hands back is entirely the consumer's decision.
 
 That separation is the whole design. Any workbench, command, or macro can use AxisFlow through its Python API without AxisFlow knowing anything about it — the dependency runs one way only. A consumer is free to build its geometry with whatever it likes, including FreeCAD's own `Draft.make_line` / `make_wire` / `make_circle`, which live in `draftmake/*` and touch neither `Snapper` nor `DraftToolBar`.
 
@@ -42,9 +42,15 @@ An optional Draft adapter (`axisflow_snap.py`) still exists, but only as a coope
 
 ## Status
 
-Working today: the constraint solver (ortho and radial, working-plane relative, coordinate-field locks incl. polar distance/angle, smart lock); a singleton service with signals; a Coin3D compass that orients to the working plane (contour + centre point, square in ortho / circle in radial, no Z axis, size and colours from settings); a configurable **live guide line** from the compass centre to the cursor (on/off, style and colour from settings); **live-line indexing** in the local frame (snap the line length to a remembered "indexed distance", or onto the nearest X/Y axis, shown as a candidate point / candidate axis, with the coordinate fields following the snap); a floating panel with editable unit-aware fields, an active field chosen by the nearest axis with a highlight and Tab cycling, lock checkboxes, "just start typing" with the caret always in the active field, AccuDraw-style sign-from-direction (optional, the "Smart negative direction" setting), round-on-blur, and optional **focus advance on movement** (type X, move the mouse deliberately -- the caret is already in Y), and a **Local/World coordinate-frame** button; an optional **compass follows direction** mode (off / keep Z / full: each confirmed point re-aims the compass +X along the segment just drawn, AccuDraw's rotate-to-segment); a smooth **compass rotation animation** (slerp with ease-in/out, duration a setting, purely visual — input math never waits); a reconfigurable key map persisted to FreeCAD's parameter tree; an input state machine (Idle/Tracking/Finished, continue mode, finish-line vs cancel-command, Enter commits a point); the public **`getPoint(callback, movecallback, last, continuous, finishcallback)`** callback API; a demo Line command that draws multiple lines with a live preview and picks up the active working plane; **object snapping** that reuses FreeCAD's own snaps (endpoint, midpoint, centre, intersection, perpendicular, near, extension, parallel, angle, ortho, grid and the rest), with Draft's snap palette on the AxisFlow toolbar and an unconditional **axis hold** (while the cursor rides a compass axis, a snap contributes its along-axis coordinate instead of pulling the point off the axis); a live **settings dialog** (sections Compass / Live Line / Behaviour / Hotkeys) that applies every option on the fly, including rebinding keys by pressing them; editable default keys in **`hotkeys.ini`**; **interface translation** following FreeCAD's UI language (eight languages bundled); palette commands with icons and a workbench icon; automated tests (C++ unit tests plus a Python API suite); and the optional Draft adapter.
+Working today: the constraint solver (ortho and radial, working-plane relative, coordinate-field locks incl. polar distance/angle, smart lock); a singleton service with signals; a Coin3D compass that orients to the working plane (contour + centre point, square in ortho / circle in radial, no Z axis, size and colours from settings); a configurable **live guide line** from the compass centre to the cursor (on/off, style and colour from settings); **live-line indexing** in the local frame (snap the line length to a remembered "indexed distance", or onto the nearest X/Y axis, shown as a candidate point / candidate axis, with the coordinate fields following the snap); a floating panel with editable numeric fields (unit suffixes are not accepted yet -- see Status), an active field chosen by the nearest axis with a highlight and Tab cycling, lock checkboxes, "just start typing" with the caret always in the active field, AccuDraw-style sign-from-direction (optional, the "Smart negative direction" setting), round-on-blur, and optional **focus advance on movement** (type X, move the mouse deliberately -- the caret is already in Y), and a **Local/World coordinate-frame** button; an optional **compass follows direction** mode (off / keep Z / full: each confirmed point re-aims the compass +X along the segment just drawn, AccuDraw's rotate-to-segment); a smooth **compass rotation animation** (slerp with ease-in/out, duration a setting, purely visual — input math never waits); a reconfigurable key map persisted to FreeCAD's parameter tree; an input state machine (Idle/Tracking/Finished, continue mode, finish-line vs cancel-command, Enter commits a point); the public **`getPoint(callback, movecallback, last, continuous, finishcallback)`** callback API; a demo Line command that draws multiple lines with a live preview and picks up the active working plane; **object snapping** that reuses FreeCAD's own snaps (endpoint, midpoint, centre, intersection, perpendicular, near, extension, parallel, angle, ortho, grid and the rest), with Draft's snap palette on the AxisFlow toolbar and an unconditional **axis hold** (while the cursor rides a compass axis, a snap contributes its along-axis coordinate instead of pulling the point off the axis); a live **settings dialog** (sections Compass / Live Line / Behaviour / Hotkeys) that applies every option on the fly, including rebinding keys by pressing them; editable default keys in **`hotkeys.ini`**; **interface translation** following FreeCAD's UI language (eight languages bundled); palette commands with icons and a workbench icon; automated tests (C++ unit tests plus a Python API suite); and the optional Draft adapter.
 
 Not there yet (**not yet implemented**): typed **absolute/relative** entry beyond the per-axis world conversion; a dockable coordinate panel; Sketcher support; a published **Linux/macOS build** (only Windows is built today — the cross-platform build is in progress).
+
+Not working yet: **unit suffixes in the coordinate fields.** The fields accept
+digits, a sign and a decimal separator only, so `1,5 m` or `2 ft` cannot be
+typed -- values are entered in the document's base unit. The parser behind them
+(`Base::Quantity`) already understands units; re-allowing letters in the field
+validator is what is missing.
 
 ## Object snapping
 
@@ -92,16 +98,18 @@ AxisFlow is keyboard-first. Inside its own tools the caret always sits in the ac
 | `S` | RotateSide | side orientation: compass Z along global +X, compass Y along global +Z |
 | `V` | RotateByView | align the compass with the current camera orientation |
 | `E` | RotateCycle | cycle Top → Front → Side → Top… |
+| `M` | ToggleSegmentMode | relayed to the running command; the line demo switches the next segment between a straight line and an arc |
 | `Escape` | FinishLine | finish the **current** line (it is saved) and start a new one; the compass and coordinate window stay up |
 | `` ` `` (backtick) | CancelCommand | finish the current line **and** end the whole command |
+| `R` then `X`/`Y`/`Z` | RotateAboutX/Y/Z | turn the compass 90° about its own axis (a two-key chord — see below) |
 
 **Coordinate-window editing keys** — active while a field has the caret (own-tool mode):
 
 | Key | What it does |
 |---|---|
 | `0`–`9`, `.`, `,`, `-`, `+` | start / continue typing a value into the active field |
-| `Backspace` | delete the last character of the entry |
-| `Delete` | clear the entry and release that field's override |
+| `Backspace` | delete the last character of the entry — **only while a value is being typed**; otherwise the key goes to FreeCAD |
+| `Delete` | clear the entry and release that field's override — again **only while typing**, so `Del` still deletes the selected object the rest of the time |
 | `Tab` / `Shift`+`Tab` | move the active field to the next / previous visible field |
 | the global keys above | still act as actions even while a field is focused |
 
@@ -113,7 +121,7 @@ The lock checkboxes next to the fields carry the same meaning: **ticked = the fi
 
 `SmartLock` (default `Enter`) constrains movement to the axis the cursor leans towards by freezing the **other two** fields at 0 — X+Z frozen means movement only along Y, Y+Z frozen means movement only along X; in radial mode it freezes the angle at the nearest 0/90/180/270° and Z at 0, leaving the distance free; press again to release.
 
-Actions with **no default key** but available through the API and `hotkeys.ini`: `ToggleActive` (turn AxisFlow on/off — it works in **both** directions, including while AxisFlow is off), `ClearLocks` (release every locked field), `CancelEntry` (layered: abort a value entry, then release locks). The settings dialog shows the everyday keys on the **Control hotkeys** page and the orientation keys on **View hotkeys**; `ConfirmPoint`, `ClearLocks` and `CancelEntry` are bindable but not listed there.
+Actions with **no default key** but available through the API and `hotkeys.ini`: `ToggleActive` (turn AxisFlow on/off — it works in **both** directions, including while AxisFlow is off), `ClearLocks` (release every locked field), `CancelEntry` (layered: abort a value entry, then release locks). The settings dialog shows the everyday keys on the **Control hotkeys** page and the orientation keys on **View hotkeys**; `ClearLocks`, `CancelEntry` and `ConfirmPoint` are bindable through `hotkeys.ini` and the API but are not listed in the dialog.
 
 ### Changing the defaults (`hotkeys.ini`)
 
@@ -165,6 +173,41 @@ An action may hold several keys (e.g. `ConfirmPoint` is bound to both `Return` a
 
 The optional Draft adapter deliberately unbinds `X`/`Y`/`Z`/`Enter`/`Escape` for the duration of its session (with `persist=False`, so your stored layout is untouched) because those belong to Draft while its command runs.
 
+
+### Two-key chords
+
+A binding can be a **pair of keys pressed in sequence**, the way MicroStation
+does it: press the prefix, then the key that completes it. Three ship by
+default and turn the compass 90 degrees about its *own* axis, wherever it
+currently points (unlike Top/Front/Side, which are absolute):
+
+| Keys | Action |
+|---|---|
+| `R` `X` | turn 90 deg about the compass X axis |
+| `R` `Y` | turn 90 deg about the compass Y axis |
+| `R` `Z` | turn 90 deg about the compass Z axis |
+
+While the prefix is waiting, a small hint appears beside the coordinate window
+listing what is on offer, one option per line. Any key that does not complete a
+chord cancels the wait and does nothing else, so a mistyped `R`, `Y` never
+silently freezes the Y field; Escape cancels it too. There is no timeout.
+
+**A key is either a binding of its own or the first key of a chord, never
+both.** With `R X` defined, plain `R` cannot be assigned to anything --
+otherwise pressing `R` could only be resolved by waiting to see whether a
+second key follows, and behaviour would depend on how fast you type. For the
+same reason a chord is limited to two keys. Bindings that break the rule are
+refused, with an explanation, wherever they are made.
+
+To record a chord in the settings dialog, hold **Shift** while pressing the
+first key; the button then waits for the second. In `hotkeys.ini` a space joins
+the two keys of a chord, while a comma still separates alternative keys:
+
+```ini
+SmartLock    = Return, Enter   ; two alternative single keys
+RotateAboutX = R X             ; one chord
+```
+
 ## Settings
 
 All options are stored in FreeCAD's own parameter tree under `User parameter:BaseApp/Preferences/Mod/AxisFlow`. That is an XML file (`user.cfg`) in the user's config directory: always writable, surviving a module reinstall, readable identically from C++ and Python. Every option is also reachable from Python via `AF.getSettings()` / `AF.setSetting(name, value)`.
@@ -210,14 +253,17 @@ AF.getSettings()                          # -> dict, including the 'hotkeys' map
 AF.resetSettings()                        # restore built-in defaults
 ```
 
+Each section has its own **Restore defaults** button, which writes back the factory values of that section alone — adjusting the compass will not touch your indexing tolerances or your keys. The two hotkey pages have a key-reset button of their own (it restores the keys of both pages).
+
 ## Commands
 
 The workbench menu / toolbar exposes:
 
 * **Activate AxisFlow** (`AxisFlow_Activate`) — toggle the standalone compass tool on the active 3-D view.
-* **Draw line** (`AxisFlow_DrawLine`) — draw a polyline through AxisFlow's `getPoint()` API (Escape starts a new line, backtick ends the command). The geometry lives in the demo consumer, `axisflow_demo.py`.
-* **Toggle live line** (`AxisFlow_ToggleLiveLine`) — show / hide the live guide line (flips `liveLineEnabled`; the change is persisted).
+* **Draw line** (`AxisFlow_DrawLine`) — draw a polyline through AxisFlow's `getPoint()` API (Escape starts a new line, backtick ends the command). The geometry lives in the demo consumer, `axisflow_demo.py`. Press **M** to make the next segment an arc: click its endpoint, then a point along the arc. Arcs are not forced to be tangent, so segments may meet at any angle, and they are not restricted to a plane. The line can be snapped to itself while you draw it: its confirmed part is published as a temporary object, so endpoints, midpoints and perpendiculars of the segments you have already placed are ordinary snap targets.
 * **Settings** (`AxisFlow_Settings`) — open the live settings dialog described above.
+
+`AxisFlow_ToggleLiveLine` (show / hide the live guide line) is still registered but no longer sits on the palette — the live line is a checkbox in the settings dialog. Add it to a custom toolbar, or call it from a macro, if you want it back as a button.
 
 ## Installation
 

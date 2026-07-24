@@ -106,17 +106,33 @@ public:
      * user's stored layout).
      */
     void setHotkey(int qtKey, AxisAction a, bool persist = true);
+    /** Bind a two-key chord (e.g. R then X). Same persistence semantics. */
+    void setHotkeyChord(KeyChord c, AxisAction a, bool persist = true);
 
     /** Bind an action to a whole list of keys at once (replacing its previous
      *  ones). Needed by the settings UI: an action may legitimately own several
      *  keys, e.g. ConfirmPoint on both Return and the numpad Enter. */
-    void setHotkeys(AxisAction a, const std::vector<int>& keys, bool persist = true);
+    bool setHotkeys(AxisAction a, const std::vector<KeyChord>& keys, bool persist = true);
 
     /** Forget the user's key overrides and fall back to the defaults layer
      *  (built-in plus hotkeys.ini). Other settings are untouched. */
     void resetHotkeys();
     /** Execute a semantic action (used by both the panel and the Coin handler). */
     void           performAction(AxisAction a);
+
+    // ---------------------------------------------------------------------
+    // Two-key chords (MicroStation style: R then X)
+    // ---------------------------------------------------------------------
+    /** The prefix we are waiting on, or 0 when no chord is in progress. */
+    int  pendingPrefix() const { return _pendingPrefix; }
+    /** Start waiting for the second key of a chord (emits stateChanged so the
+     *  panel can show which keys are on offer). */
+    void setPendingPrefix(int qtKey);
+    /** Stop waiting -- the next key press ends it, whatever it was. */
+    void clearPendingPrefix();
+    /** Second keys still available for the pending prefix, with their actions.
+     *  Empty when nothing is pending. This is the panel's hint. */
+    std::vector<std::pair<int, AxisAction>> pendingOptions() const;
 
     /**
      * Commit a point as the new origin. Clears keyboard overrides and the axis
@@ -211,6 +227,10 @@ public:
     void clearKeyValue(int field);
     /** True if field 0/1/2 currently carries a typed override. */
     bool hasKeyValue(int field) const;
+    /** Any coordinate field is fixed -- typed OR locked. This is exactly what
+     *  the panel's checkboxes show, and what makes the compass path worth
+     *  drawing: the point is no longer simply "under the cursor". */
+    bool anyFieldFixed() const;
     /** The signed override value for a field (NaN when unset). */
     double keyValue(int field) const;
 
@@ -275,10 +295,6 @@ public:
     Base::Vector3d planeV()      const { return _solver.getPlaneV(); }
     Base::Vector3d planeNormal() const { return _solver.getPlaneNormal(); }
 
-    /** Escape hatch for clients that need the raw solver (kept minimal). */
-    AxisFlowSolver&       solver()       { return _solver; }
-    const AxisFlowSolver& solver() const { return _solver; }
-
 Q_SIGNALS:
     /** Mode / lock / key value / plane / origin changed. */
     void stateChanged();
@@ -291,6 +307,10 @@ Q_SIGNALS:
     /** Finish the current line/polyline but keep the session running so the
      *  consumer can immediately start the next one (FinishLine / Escape). */
     void finishRequested();
+    /** A consumer-defined mode toggle (ToggleSegmentMode). AxisFlow attaches no
+     *  meaning to it: the getPoint consumer decides what the mode is. The line
+     *  demo switches between straight and arc segments. */
+    void segmentModeRequested();
     /** Enter/ConfirmPoint: the tool should place the current solved point. */
     void confirmRequested();
     /** RotateByView needs the camera; the view-owning tool serves it. */
@@ -312,6 +332,7 @@ private:
     bool           _hasFollowRef { false };          // a previous point exists
     int            _rotateCycle { 0 };               // RotateCycle position
     bool           _hotkeysLoaded { false };     // settings pulled in yet?
+    int            _pendingPrefix { 0 };         // chord prefix awaiting key 2
     std::string    _hotkeyDefaultsPath;          // hotkeys.ini, empty = none
 };
 

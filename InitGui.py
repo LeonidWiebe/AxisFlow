@@ -78,10 +78,14 @@ class AxisFlowWorkbenchPy(FreeCADGui.Workbench):
     Icon     = ""
 
     def Initialize(self):
+        # AxisFlow_ToggleLiveLine is deliberately NOT on the palette: the live
+        # line is a checkbox in the settings dialog (Live Line section), and a
+        # toolbar button for one boolean earned its space less than the room it
+        # took. The command stays registered, so it can still be put on a custom
+        # toolbar or called from Python / a macro.
         self.list = [
             "AxisFlow_Activate",
             "AxisFlow_DrawLine",
-            "AxisFlow_ToggleLiveLine",
             "AxisFlow_Settings",
         ]
         self.appendToolbar("AxisFlow", self.list)

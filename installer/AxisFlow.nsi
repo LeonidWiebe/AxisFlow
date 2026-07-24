@@ -16,7 +16,7 @@ Unicode true
 
 ; ---- identity (APPVERSION can be overridden: makensis /DAPPVERSION=x.y.z) ----
 !ifndef APPVERSION
-  !define APPVERSION "0.1.3"
+  !define APPVERSION "0.2.0"
 !endif
 !define APPNAME    "AxisFlow"
 !define FCTARGET   "FC1.1"

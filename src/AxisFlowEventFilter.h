@@ -1,11 +1,12 @@
 #pragma once
 
 #include <QtCore/QObject>
+#include <QtCore/QPointer>
 
-namespace Gui { class View3DInventor; }
+// Complete type required by QPointer (its data() static_casts QObject* to T*).
+#include <Gui/View3DInventor.h>
 
 class QEvent;
-class QKeyEvent;
 
 namespace AxisFlowGui {
 
@@ -29,9 +30,10 @@ namespace AxisFlowGui {
  *   ownsInput = false (Draft adapter) -- only bound action keys are claimed, so
  *       digits, Enter and Escape stay with Draft's coordinate fields.
  *
- * In both modes nothing is touched unless the service is active and keyboard
- * focus is inside our 3-D view (never while the panel, a dialog or the Python
- * console has focus).
+ * This class decides only WHERE it may act (inScope: never while the panel, a
+ * dialog or the Python console has focus). WHAT a key means is routeKey() in
+ * AxisFlowKeyRouting.h -- one policy, shared with the panel, covered by Tier-1
+ * tests.
  */
 class AxisFlowEventFilter : public QObject
 {
@@ -59,12 +61,11 @@ private:
      * dialog -- keeps its keys.
      */
     bool inScope() const;
-    /** A printable character that starts a numeric entry. */
-    static bool isValueChar(const QKeyEvent* ke);
-    /** This key is one we intend to consume (action, or value char if we own input). */
-    bool claims(const QKeyEvent* ke) const;
 
-    Gui::View3DInventor* _view      { nullptr };
+    /** Held weakly, like the tool's own pointer: the filter is a child of the
+     *  tool and is removed when the view dies, but inScope() must not be able
+     *  to read a destroyed view even for one stray event. */
+    QPointer<Gui::View3DInventor> _view;
     bool                 _ownsInput { false };
     bool                 _installed { false };
 };

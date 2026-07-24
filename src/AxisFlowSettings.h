@@ -8,6 +8,51 @@
 
 namespace AxisFlowGui {
 
+/**
+ * Factory defaults, in one public place.
+ *
+ * They used to live as file-local constants in the .cpp, which meant the only
+ * way to get at them was to actually reset the settings. The settings dialog
+ * needs to READ them (its per-section "Restore defaults" button writes just
+ * that section's options back), so they are exposed here and the .cpp
+ * constants are now derived from them -- still a single source of truth.
+ */
+struct AxisFlowDefaults {
+    static constexpr int    compassSize   = 100;
+    static constexpr int    axisThickness = 4;
+    static constexpr double axisStartPct  = 0.80;
+    static constexpr double axisLengthPct = 0.35;
+    static constexpr unsigned long axisColorX = 0xFF0000FFul;   // red
+    static constexpr unsigned long axisColorY = 0x00FF00FFul;   // green
+    static constexpr unsigned long activeFieldColor = 0xDCDCDCFFul;
+    static constexpr double fillTransparency = 0.65;
+    static constexpr bool   alwaysShowCompass = false;
+
+    static constexpr bool   liveLineEnabled = false;
+    static constexpr int    liveLineStyle   = 0;    // solid
+    static constexpr unsigned long liveLineColor = 0x00AAFFFFul;
+    static constexpr double liveLineTransparency = 0.50;
+
+    // Compass path: the dashed poly-line breaking the prospective point down
+    // into a leg in the compass plane plus a leg along the normal.
+    static constexpr bool   compassPathEnabled = true;
+    static constexpr int    compassPathStyle   = 1;    // dashed
+    static constexpr unsigned long compassPathColor = 0xC8C8C8FFul;   // light grey
+
+    static constexpr bool   useDistanceIndexing = true;
+    static constexpr bool   useAxesIndexing     = true;
+    static constexpr int    indexingTolerance   = 15;   // pixels
+    static constexpr int    indexingAxisWeight  = 8;    // pixels
+    static constexpr double indexingAxisTransparency = 0.50;
+
+    static constexpr bool   useSnapping = true;
+    static constexpr bool   smartNegativeDirection = true;
+    static constexpr bool   focusAdvanceOnMove = true;
+    static constexpr int    compassFollowDirection = 0;
+    static constexpr double compassRotateAnimation = 0.5;
+};
+
+
 class Hotkeys;
 
 /**
@@ -82,9 +127,17 @@ public:
     bool          liveLineEnabled() const { return _liveLineEnabled; }
     /** 0 = solid, 1 = dashed, 2 = dotted, 3 = dash-dot. */
     int           liveLineStyle()   const { return _liveLineStyle; }
+    /** Compass path: shown while an object snap is live or a coordinate field
+     *  is frozen, as the visual breakdown of where the point actually sits. */
+    bool          compassPathEnabled() const { return _compassPathEnabled; }
+    int           compassPathStyle()   const { return _compassPathStyle; }
+    unsigned long compassPathColor()   const { return _compassPathColor; }
     unsigned long liveLineColor()   const { return _liveLineColor; }   // 0xRRGGBBAA
     void setLiveLineEnabled(bool v);
     void setLiveLineStyle(int v);
+    void setCompassPathEnabled(bool v);
+    void setCompassPathStyle(int v);
+    void setCompassPathColor(unsigned long rgba);
     void setLiveLineColor(unsigned long rgba);
 
     // ---- live-line indexing ----------------------------------------------
@@ -180,6 +233,9 @@ private:
     bool          _alwaysShowCompass { false };
     bool          _liveLineEnabled   { false };
     int           _liveLineStyle     { 0 };            // solid
+    bool          _compassPathEnabled { true };
+    int           _compassPathStyle   { 1 };           // dashed
+    unsigned long _compassPathColor   { 0xC8C8C8FFul };
     unsigned long _liveLineColor     { 0x00AAFFFFul };  // cyan-blue
 
     bool          _useDistanceIndexing { true };
