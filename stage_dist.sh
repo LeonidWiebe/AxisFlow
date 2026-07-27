@@ -44,12 +44,18 @@ install -m 0644 axisflow_snap.py      "dist/${APPNAME}/"
 install -m 0644 axisflow_demo.py      "dist/${APPNAME}/"
 install -m 0644 axisflow_settings.py  "dist/${APPNAME}/"
 install -m 0644 axisflow_snapping.py  "dist/${APPNAME}/"
+install -m 0644 axisflow_transform.py "dist/${APPNAME}/"
+install -m 0644 axisflow_extrude.py   "dist/${APPNAME}/"
 install -m 0644 package.xml           "dist/${APPNAME}/"
 install -m 0644 hotkeys.ini           "dist/${APPNAME}/"
 [ -f README.md ]    && install -m 0644 README.md    "dist/${APPNAME}/"
 [ -f man/CHANGELOG.md ] && install -m 0644 man/CHANGELOG.md "dist/${APPNAME}/"
 [ -f LICENSE ]      && install -m 0644 LICENSE      "dist/${APPNAME}/"
-cp -r Resources/. "dist/${APPNAME}/Resources/" 2>/dev/null || cp -r resources/. "dist/${APPNAME}/Resources/"
+# The directory is canonically "Resources" (capital R) -- CMake, InitGui.py,
+# package.xml and the NSIS script all spell it that way. It used to exist as
+# lowercase "resources" on disk, which only worked because Windows filesystems
+# are case-insensitive; the fallback that papered over it here is gone.
+cp -r Resources/. "dist/${APPNAME}/Resources/"
 mkdir -p "dist/${APPNAME}/translations"
 cp translations/*.qm "dist/${APPNAME}/translations/" 2>/dev/null || true
 

@@ -191,6 +191,7 @@ class _KeyButton(QtWidgets.QPushButton):
 _SECTIONS = [
     (QT_TRANSLATE_NOOP("AxisFlow", "Compass"), [
         ("alwaysShowCompass", QT_TRANSLATE_NOOP("AxisFlow", "Always show compass"),   "bool",  None),
+        ("compassAnimation",  QT_TRANSLATE_NOOP("AxisFlow", "Animate the compass"),   "bool",  None),
         ("compassSize",       QT_TRANSLATE_NOOP("AxisFlow", "Compass size (px)"),     "int",   (20, 1000, 5)),
         ("axisThickness",     QT_TRANSLATE_NOOP("AxisFlow", "Axis thickness (px)"),   "int",   (1, 20, 1)),
         ("axisStartPct",      QT_TRANSLATE_NOOP("AxisFlow", "Axis start (fraction)"), "float", (0.0, 1.0, 0.05, 2)),
@@ -225,7 +226,7 @@ _SECTIONS = [
         ("compassFollowDirection", QT_TRANSLATE_NOOP("AxisFlow", "Compass follows direction"), "enum",
             [QT_TRANSLATE_NOOP("AxisFlow", "Off"), QT_TRANSLATE_NOOP("AxisFlow", "On (keep Z)"),
              QT_TRANSLATE_NOOP("AxisFlow", "On (full)")]),
-        ("compassRotateAnimation", QT_TRANSLATE_NOOP("AxisFlow", "Compass rotation animation (s)"), "float", (0.0, 2.0, 0.1, 2)),
+        ("compassRotateAnimation", QT_TRANSLATE_NOOP("AxisFlow", "Compass animation (s)"), "float", (0.0, 2.0, 0.1, 2)),
     ]),
 ]
 

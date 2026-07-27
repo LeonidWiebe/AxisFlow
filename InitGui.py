@@ -86,6 +86,9 @@ class AxisFlowWorkbenchPy(FreeCADGui.Workbench):
         self.list = [
             "AxisFlow_Activate",
             "AxisFlow_DrawLine",
+            "AxisFlow_Move",
+            "AxisFlow_Copy",
+            "AxisFlow_Extrude",
             "AxisFlow_Settings",
         ]
         self.appendToolbar("AxisFlow", self.list)

@@ -32,7 +32,8 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 TRDIR = os.path.join(ROOT, "translations")
 BASE = os.path.join(TRDIR, "AxisFlow.ts")
 
-PY_FILES = ["InitGui.py", "axisflow_settings.py", "axisflow_demo.py"]
+PY_FILES = ["InitGui.py", "axisflow_settings.py", "axisflow_demo.py",
+            "axisflow_transform.py", "axisflow_extrude.py"]
 CPP_DIRS = ["src"]
 
 

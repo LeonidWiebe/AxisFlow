@@ -5,6 +5,10 @@
 #include <Inventor/SbTime.h>
 #include <Inventor/SbColor.h>
 
+#include <utility>
+#include <vector>
+
+class SoNode;
 class SoSeparator;
 class SoSwitch;
 class SoTransform;
@@ -137,6 +141,9 @@ private:
     SoSeparator*   _root       { nullptr };
     SoSwitch*      _visSwitch  { nullptr };   // whole compass on/off
     SoTransform*   _transform  { nullptr };
+    // The compass proper (contour + dot + axes), without the cursor-tracking
+    // attachments. Deep-copied to make the ghost left behind by a move.
+    SoSeparator*   _bodySep    { nullptr };
 
     // Contour: switch between square (0) and circle (1).
     SoSwitch*      _contour    { nullptr };
@@ -144,6 +151,7 @@ private:
     SoCoordinate3* _coordSq    { nullptr };
     SoFaceSet*     _faceSq     { nullptr };
     SoCoordinate3* _outlineSq  { nullptr };
+    SoMaterial*    _outlineMatSq { nullptr };
     SoLineSet*     _lineSq     { nullptr };
     SoDrawStyle*   _styleSq    { nullptr };
 
@@ -151,22 +159,23 @@ private:
     SoCoordinate3* _coordCi    { nullptr };
     SoFaceSet*     _faceCi     { nullptr };
     SoCoordinate3* _outlineCi  { nullptr };
+    SoMaterial*    _outlineMatCi { nullptr };
     SoLineSet*     _lineCi     { nullptr };
     SoDrawStyle*   _styleCi    { nullptr };
 
     // Centre point.
-    SoBaseColor*   _dotColor   { nullptr };
+    SoMaterial*    _dotColor   { nullptr };
     SoDrawStyle*   _dotStyle   { nullptr };
     SoCoordinate3* _coordDot   { nullptr };
     SoPointSet*    _dot        { nullptr };
 
     // Axes (X, Y only).
-    SoBaseColor*   _colorX     { nullptr };
+    SoMaterial*    _colorX     { nullptr };
     SoDrawStyle*   _styleX     { nullptr };
     SoCoordinate3* _coordX     { nullptr };
     SoLineSet*     _lineX      { nullptr };
 
-    SoBaseColor*   _colorY     { nullptr };
+    SoMaterial*    _colorY     { nullptr };
     SoDrawStyle*   _styleY     { nullptr };
     SoCoordinate3* _coordY     { nullptr };
     SoLineSet*     _lineY      { nullptr };
@@ -218,17 +227,50 @@ private:
     SbVec3f _origin  { 0, 0, 0 };
     SbVec3f _cursor  { 0, 0, 0 };
 
-    // ---- rotation animation (display only) --------------------------------
+    // ---- animation (display only) -----------------------------------------
+    // ONE timer drives both the rotation and the move: they overlap routinely
+    // (a confirm with CompassFollowDirection on both re-anchors and re-aims),
+    // and two 60 Hz sensors for one compass would be waste. Each keeps its own
+    // start time and active flag, so they run on independent clocks; the sensor
+    // unschedules itself once neither is in flight.
     SoTimerSensor* _animSensor { nullptr };
+    float      _animDurationS { 0.5f };   // 0 = instant (from settings)
+    static void animTickCB(void* data, SoSensor*);
+    void animTick();
+    void startAnimSensor();
+    void stopAnimSensorIfIdle();
+
+    // rotation
+    bool       _rotActive  { false };
     SbRotation _animFrom, _animTo;
     SbVec3f    _animTgtU { 1, 0, 0 }, _animTgtV { 0, 1, 0 }, _animTgtN { 0, 0, 1 };
     SbTime     _animT0;
-    float      _animDurationS { 0.5f };   // 0 = instant (from settings)
     bool       _hasOrientation { false }; // first setPlane snaps, no animation
-    static void animTickCB(void* data, SoSensor*);
-    void animTick();
     void applyRotationNow(const SbRotation& r);  // transform + derived u/v/n
-    void finishAnimation();
+    void finishRotation();
+
+    // move: a cross-fade between a ghost frozen at the old anchor and the live
+    // compass at the new one. Both are the SAME geometry -- the ghost is a deep
+    // copy taken when the move starts, so it needs no syncing and simply dies
+    // when the fade ends.
+    SoSwitch*    _ghostSwitch    { nullptr };
+    SoSeparator* _ghostSep       { nullptr };
+    SoTransform* _ghostTransform { nullptr };
+    SoSeparator* _ghostBody      { nullptr };   // the deep copy, or null
+    bool         _moveActive     { false };
+    bool         _hasOrigin      { false };     // first setOrigin snaps
+    SbTime       _moveT0;
+    // Node + the transparency it had before the fade started, so the fade is a
+    // modulation of the real style rather than a value that overwrites it. The
+    // live entries MUST be restored exactly, or a fade would leak into the
+    // fill transparency setting.
+    std::vector<std::pair<SoMaterial*, float>> _liveFade, _ghostFade;
+    void startMove(const SbVec3f& from);
+    void finishMove();
+    void applyMoveFade(float t);              // t: 0 = just left, 1 = arrived
+    void dropGhost();
+    static void collectMaterials(SoNode* root,
+                                 std::vector<std::pair<SoMaterial*, float>>& out);
     SbVec3f _u       { 1, 0, 0 };
     SbVec3f _v       { 0, 1, 0 };
     SbVec3f _n       { 0, 0, 1 };

@@ -150,10 +150,21 @@ void AxisFlowService::activate()
 
 void AxisFlowService::deactivate()
 {
+    // A hidden compass is per-command state. Letting it outlive the command --
+    // an aborted pick, say -- would leave the user with no compass and no way
+    // to guess why.
+    setCompassHidden(false);
     if (!_active) return;
     _active = false;
     Q_EMIT activeChanged(false);
     Q_EMIT stateChanged();
+}
+
+void AxisFlowService::setCompassHidden(bool hidden)
+{
+    if (_compassHidden == hidden) return;
+    _compassHidden = hidden;
+    Q_EMIT compassHiddenChanged(hidden);
 }
 
 void AxisFlowService::toggleActive()
@@ -323,6 +334,14 @@ void AxisFlowService::setOrigin(const Base::Vector3d& o)
 {
     _solver.setOrigin(o);
     _hasFollowRef = true;   // a seeded base point IS a valid segment start
+    Q_EMIT stateChanged();
+}
+
+void AxisFlowService::alignCompassX(const Base::Vector3d& dir)
+{
+    if (dir.Length() < 1e-12)
+        return;                 // nothing to aim at; leave the frame alone
+    _solver.alignCompassX(dir);
     Q_EMIT stateChanged();
 }
 

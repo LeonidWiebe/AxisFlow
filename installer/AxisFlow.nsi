@@ -16,7 +16,7 @@ Unicode true
 
 ; ---- identity (APPVERSION can be overridden: makensis /DAPPVERSION=x.y.z) ----
 !ifndef APPVERSION
-  !define APPVERSION "0.2.0"
+  !define APPVERSION "0.2.1"
 !endif
 !define APPNAME    "AxisFlow"
 !define FCTARGET   "FC1.1"
@@ -96,25 +96,24 @@ Section "AxisFlow (required)" SecMain
   SetOverwrite on
 
   SetOutPath "$INSTDIR"
-  File "${SRCDIR}\AxisFlow.pyd"
-  File "${SRCDIR}\InitGui.py"
-  File "${SRCDIR}\axisflow_snap.py"
-  File "${SRCDIR}\axisflow_demo.py"
-  File "${SRCDIR}\axisflow_settings.py"
-  File "${SRCDIR}\axisflow_snapping.py"
-  File "${SRCDIR}\package.xml"
-  File "${SRCDIR}\hotkeys.ini"
-  File /nonfatal "${SRCDIR}\README.md"
-  File /nonfatal "${SRCDIR}\man\CHANGELOG.md"
-  File /nonfatal "${SRCDIR}\LICENSE"
 
-  ; whole Resources subtree (Resources\icons\*.svg, etc.)
-  File /r "${SRCDIR}\Resources"
-
-  ; compiled translations (AxisFlow_<lang>.qm); FreeCAD loads the current one
-  SetOutPath "$INSTDIR\translations"
-  File /nonfatal "${SRCDIR}\translations\*.qm"
-  SetOutPath "$INSTDIR"
+  ; Ship the STAGED TREE VERBATIM instead of re-listing its contents here.
+  ;
+  ; stage_dist.bat is the single source of truth for what ships; it wipes dist\
+  ; and rebuilds it from an explicit list, so dist\AxisFlow is exactly the
+  ; payload -- .pyd, every axisflow_*.py, package.xml, hotkeys.ini, the docs,
+  ; Resources\ and translations\. Enumerating those files a second time here
+  ; only created a list that could drift out of sync with the staging script,
+  ; and it did: axisflow_transform.py was added to stage_dist.bat but never to
+  ; this list, so installer builds shipped Move/Copy toolbar buttons whose
+  ; commands died on ModuleNotFoundError. (The stale ${SRCDIR}\man\CHANGELOG.md
+  ; entry had rotted the same way, silenced by /nonfatal.)
+  ;
+  ; The wildcard is "*" and not "*.*": LICENSE has no extension. /r recreates
+  ; the sub-directory structure, so Resources\ and translations\ come along.
+  ; Deliberately NOT /nonfatal -- if staging did not run, makensis must fail
+  ; loudly ("File: no files found") rather than emit an empty installer.
+  File /r "${SRCDIR}\*"
 
   ; uninstaller + registration (all under HKCU -- per-user, no admin)
   SetOutPath "$INSTDIR"

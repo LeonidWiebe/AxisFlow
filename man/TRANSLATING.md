@@ -55,12 +55,16 @@ When UI strings change in the code, refresh `AxisFlow.ts`:
 python update_translations.py        # extract strings + compile all .qm
 ```
 
-It runs the FreeCAD-standard pipeline (`pylupdate`/`lupdate` → `lconvert` →
-`lrelease`). Needs Qt Linguist tools on PATH: on Debian/Ubuntu
-`pyqt5-dev-tools` + `qttools5-dev-tools`; on Qt6, `pyside6-lupdate` /
-`pyside6-lrelease`. To then pull the new strings into an existing translation,
-re-run `lupdate` on that language file (it keeps your existing translations and
-adds the new ones as “unfinished”), or use a platform like
+It extracts strings from the Python AND the C++ sources in a single `lupdate`
+pass (Qt6's `lupdate` reads `.py` directly), merges them into `AxisFlow.ts` and
+into every `AxisFlow_<lang>.ts` -- keeping existing translations and flagging
+new strings as `unfinished` -- then compiles all `.qm`. It needs only `lupdate`
+and `lrelease` on PATH: on Debian/Ubuntu `qt6-l10n-tools`, or anywhere with pip
+`pip install PySide6-Essentials` (gives `pyside6-lupdate` / `pyside6-lrelease`).
+
+Note: the old two-pass route through `lconvert` is gone -- PySide6 does not ship
+`lconvert`, so the script no longer depends on it. New strings left `unfinished`
+can be translated by hand or through a platform like
 [Crowdin](https://crowdin.com/project/freecad-addons).
 
 ## Marking new strings in code (developers)

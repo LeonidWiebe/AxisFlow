@@ -17,11 +17,28 @@ if not defined CONFIG set "CONFIG=RelWithDebInfo"
 echo === Build (%CONFIG%) ===
 cmake --build build --config %CONFIG% --target AxisFlow || exit /b 1
 
-REM locate the freshly built module wherever the generator put it
+REM locate the freshly built module. CMake sends it to build\bin
+REM (RUNTIME_OUTPUT_DIRECTORY); multi-config generators like Visual Studio add
+REM the configuration as one more level. Check those two directly.
 set "PYD="
-for /r "%~dp0build" %%F in (AxisFlow.pyd) do set "PYD=%%F"
+if exist "%~dp0build\bin\%CONFIG%\AxisFlow.pyd" set "PYD=%~dp0build\bin\%CONFIG%\AxisFlow.pyd"
+if not defined PYD if exist "%~dp0build\bin\AxisFlow.pyd" set "PYD=%~dp0build\bin\AxisFlow.pyd"
+
+REM Fallback for an unusual generator layout. Note the `if exist`, which is not
+REM optional: `for /r` with a set that contains NO wildcard does not search the
+REM tree at all -- it just prepends every directory under it to the name.
+REM Without the test this "finds" AxisFlow.pyd inside whichever directory the
+REM filesystem happens to enumerate last (ZERO_CHECK.dir, for instance), and
+REM the copy below then fails on a path that never existed. It used to work
+REM only because the real directory happened to come last.
 if not defined PYD (
-    echo *** AxisFlow.pyd not found under build\ -- configure/build first. ***
+    for /r "%~dp0build" %%F in (AxisFlow.pyd) do if exist "%%F" set "PYD=%%F"
+)
+if not defined PYD (
+    echo *** AxisFlow.pyd not found under build\ ***
+    echo     Expected: build\bin\%CONFIG%\AxisFlow.pyd
+    echo     If build\ does not exist yet, run run_tests.bat once -- it is the
+    echo     only script that configures CMake; this one only builds.
     exit /b 1
 )
 echo Found module: %PYD%
@@ -35,6 +52,8 @@ copy /y axisflow_snap.py     dist\AxisFlow\ >nul || exit /b 1
 copy /y axisflow_demo.py     dist\AxisFlow\ >nul || exit /b 1
 copy /y axisflow_settings.py dist\AxisFlow\ >nul || exit /b 1
 copy /y axisflow_snapping.py dist\AxisFlow\ >nul || exit /b 1
+copy /y axisflow_transform.py dist\AxisFlow\ >nul || exit /b 1
+copy /y axisflow_extrude.py  dist\AxisFlow\ >nul || exit /b 1
 copy /y package.xml          dist\AxisFlow\ >nul || exit /b 1
 copy /y hotkeys.ini          dist\AxisFlow\ >nul || exit /b 1
 if exist README.md    copy /y README.md    dist\AxisFlow\ >nul

@@ -149,241 +149,250 @@
     </message>
     <message>
         <location filename="../axisflow_settings.py" line="194"/>
+        <source>Animate the compass</source>
+        <translation>Анимирај компас</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_settings.py" line="195"/>
         <source>Compass size (px)</source>
         <translation>Величина компаса (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="195"/>
+        <location filename="../axisflow_settings.py" line="196"/>
         <source>Axis thickness (px)</source>
         <translation>Дебљина осе (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="196"/>
+        <location filename="../axisflow_settings.py" line="197"/>
         <source>Axis start (fraction)</source>
         <translation>Почетак осе (удео)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="197"/>
+        <location filename="../axisflow_settings.py" line="198"/>
         <source>Axis length (fraction)</source>
         <translation>Дужина осе (удео)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="198"/>
+        <location filename="../axisflow_settings.py" line="199"/>
         <source>Fill transparency</source>
         <translation>Провидност испуне</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="199"/>
+        <location filename="../axisflow_settings.py" line="200"/>
         <source>X axis colour</source>
         <translation>Боја X осе</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="200"/>
+        <location filename="../axisflow_settings.py" line="201"/>
         <source>Y axis colour</source>
         <translation>Боја Y осе</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="201"/>
+        <location filename="../axisflow_settings.py" line="202"/>
         <source>Active field colour</source>
         <translation>Боја активног поља</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="203"/>
+        <location filename="../axisflow_settings.py" line="204"/>
         <source>Live Line</source>
         <translation>Жива линија</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="204"/>
+        <location filename="../axisflow_settings.py" line="205"/>
         <source>Live line</source>
         <translation>Жива линија</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="205"/>
+        <location filename="../axisflow_settings.py" line="206"/>
         <source>Live line style</source>
         <translation>Стил живе линије</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="206"/>
-        <location filename="../axisflow_settings.py" line="212"/>
+        <location filename="../axisflow_settings.py" line="207"/>
+        <location filename="../axisflow_settings.py" line="213"/>
         <source>Solid</source>
         <translation>Пуна</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="206"/>
-        <location filename="../axisflow_settings.py" line="212"/>
+        <location filename="../axisflow_settings.py" line="207"/>
+        <location filename="../axisflow_settings.py" line="213"/>
         <source>Dashed</source>
         <translation>Испрекидана</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="207"/>
-        <location filename="../axisflow_settings.py" line="213"/>
+        <location filename="../axisflow_settings.py" line="208"/>
+        <location filename="../axisflow_settings.py" line="214"/>
         <source>Dotted</source>
         <translation>Тачкаста</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="207"/>
-        <location filename="../axisflow_settings.py" line="213"/>
+        <location filename="../axisflow_settings.py" line="208"/>
+        <location filename="../axisflow_settings.py" line="214"/>
         <source>Dash-dot</source>
         <translation>Црта-тачка</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="208"/>
+        <location filename="../axisflow_settings.py" line="209"/>
         <source>Live line colour</source>
         <translation>Боја живе линије</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="209"/>
+        <location filename="../axisflow_settings.py" line="210"/>
         <source>Live line transparency</source>
         <translation>Провидност живе линије</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="210"/>
+        <location filename="../axisflow_settings.py" line="211"/>
         <source>Draw path to the point</source>
         <translation>Цртај путању до тачке</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="211"/>
+        <location filename="../axisflow_settings.py" line="212"/>
         <source>Path style</source>
         <translation>Стил путање</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="214"/>
+        <location filename="../axisflow_settings.py" line="215"/>
         <source>Path colour</source>
         <translation>Боја путање</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="215"/>
+        <location filename="../axisflow_settings.py" line="216"/>
         <source>Use distance indexing</source>
         <translation>Користи индексирање по растојању</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="216"/>
+        <location filename="../axisflow_settings.py" line="217"/>
         <source>Use axes indexing</source>
         <translation>Користи индексирање по осама</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="217"/>
+        <location filename="../axisflow_settings.py" line="218"/>
         <source>Indexing tolerance (px)</source>
         <translation>Толеранција индексирања (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="218"/>
+        <location filename="../axisflow_settings.py" line="219"/>
         <source>Indexing axis weight (px)</source>
         <translation>Дебљина осе индексирања (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="219"/>
+        <location filename="../axisflow_settings.py" line="220"/>
         <source>Indexing axis transparency</source>
         <translation>Провидност осе индексирања</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="221"/>
+        <location filename="../axisflow_settings.py" line="222"/>
         <source>Behaviour</source>
         <translation>Понашање</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="222"/>
+        <location filename="../axisflow_settings.py" line="223"/>
         <source>Use object snapping</source>
         <translation>Користи хватање објеката</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="223"/>
+        <location filename="../axisflow_settings.py" line="224"/>
         <source>Smart negative direction</source>
         <translation>Паметан негативан смер</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="224"/>
+        <location filename="../axisflow_settings.py" line="225"/>
         <source>Focus advance on movement</source>
         <translation>Пребацивање фокуса при померању</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="225"/>
+        <location filename="../axisflow_settings.py" line="226"/>
         <source>Compass follows direction</source>
         <translation>Компас прати смер</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="226"/>
+        <location filename="../axisflow_settings.py" line="227"/>
         <source>Off</source>
         <translation>Искључено</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="226"/>
+        <location filename="../axisflow_settings.py" line="227"/>
         <source>On (keep Z)</source>
         <translation>Укључено (задржи Z)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="227"/>
+        <location filename="../axisflow_settings.py" line="228"/>
         <source>On (full)</source>
         <translation>Укључено (потпуно)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="228"/>
-        <source>Compass rotation animation (s)</source>
-        <translation>Анимација ротације компаса (с)</translation>
+        <location filename="../axisflow_settings.py" line="229"/>
+        <source>Compass animation (s)</source>
+        <translation>Анимација компаса (с)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="268"/>
+        <source>Compass rotation animation (s)</source>
+        <translation type="vanished">Анимација ротације компаса (с)</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_settings.py" line="269"/>
         <source>Pick colour</source>
         <translation>Изабери боју</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="280"/>
+        <location filename="../axisflow_settings.py" line="281"/>
         <source>AxisFlow settings</source>
         <translation>AxisFlow подешавања</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="313"/>
+        <location filename="../axisflow_settings.py" line="314"/>
         <source>Restore defaults</source>
         <translation>Врати подразумевано</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="315"/>
+        <location filename="../axisflow_settings.py" line="316"/>
         <source>Restores the default values of this section only</source>
         <translation>Враћа подразумеване вредности само овог одељка</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="328"/>
+        <location filename="../axisflow_settings.py" line="329"/>
         <source>Control hotkeys</source>
         <translation>Тастери управљања</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="330"/>
+        <location filename="../axisflow_settings.py" line="331"/>
         <source>View hotkeys</source>
         <translation>Тастери погледа</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="346"/>
+        <location filename="../axisflow_settings.py" line="347"/>
         <source>Close</source>
         <translation>Затвори</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="361"/>
+        <location filename="../axisflow_settings.py" line="362"/>
         <source>Click a key field, then press the key you want. Assigning replaces that action&apos;s current key(s). Keys work while AxisFlow is running.</source>
         <translation>Кликните на поље тастера, затим притисните жељени тастер. Додела замењује тренутне тастере те радње. Тастери раде док је AxisFlow активан.</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="382"/>
+        <location filename="../axisflow_settings.py" line="383"/>
         <source>Unassign</source>
         <translation>Уклони доделу</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="390"/>
+        <location filename="../axisflow_settings.py" line="391"/>
         <source>Restore default keys</source>
         <translation>Врати подразумеване тастере</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="391"/>
+        <location filename="../axisflow_settings.py" line="392"/>
         <source>Resets the keys of BOTH hotkey pages</source>
         <translation>Враћа тастере ОБЕ странице на подразумеване</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="445"/>
-        <location filename="../axisflow_settings.py" line="483"/>
+        <location filename="../axisflow_settings.py" line="446"/>
+        <location filename="../axisflow_settings.py" line="484"/>
         <source>Key cannot be used</source>
         <translation>Тастер се не може користити</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="446"/>
+        <location filename="../axisflow_settings.py" line="447"/>
         <source>{key} is already the {kind} used by &quot;{action}&quot;.
 
 A key is either a binding of its own or the first key of a two-key chord, never both.</source>
@@ -392,28 +401,68 @@ A key is either a binding of its own or the first key of a two-key chord, never 
 Тастер је или самостална додела или први тастер комбинације од два тастера, никада обоје.</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="451"/>
+        <location filename="../axisflow_settings.py" line="452"/>
         <source>start of a chord</source>
         <translation>почетак комбинације</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="452"/>
+        <location filename="../axisflow_settings.py" line="453"/>
         <source>single key</source>
         <translation>појединачни тастер</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="467"/>
+        <location filename="../axisflow_settings.py" line="468"/>
         <source>Key already used</source>
         <translation>Тастер је већ у употреби</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="468"/>
+        <location filename="../axisflow_settings.py" line="469"/>
         <source>{key} is currently assigned to &quot;{action}&quot;.
 
 Reassign it? That action will be left without a key.</source>
         <translation>{key} је тренутно додељен радњи „{action}“.
 
 Да ли да се додели поново? Та радња ће остати без тастера.</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="211"/>
+        <source>Pick base point</source>
+        <translation>Изаберите базну тачку</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="212"/>
+        <source>Pick target point</source>
+        <translation>Изаберите циљну тачку</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="238"/>
+        <source>No active document</source>
+        <translation>Нема активног документа</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="247"/>
+        <source>Click an object to transform (that click is also the base point)</source>
+        <translation>Кликните на објекат (тај клик је уједно и базна тачка)</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="341"/>
+        <source>Nothing under the cursor -- click an object</source>
+        <translation>Ништа испод курсора — кликните на објекат</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_extrude.py" line="379"/>
+        <source>Drag or type the extrusion height</source>
+        <translation>Превуците или унесите висину извлачења</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_extrude.py" line="406"/>
+        <source>AxisFlow extrude: the wire is not planar -- there is no plane to be perpendicular to</source>
+        <translation>AxisFlow извлачење: жица није равна — не постоји раван на коју би била нормална</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_extrude.py" line="416"/>
+        <source>AxisFlow extrude: sweeping all selected wires along the first one&apos;s normal</source>
+        <translation>AxisFlow извлачење: све изабране жице се извлаче дуж нормале прве</translation>
     </message>
 </context>
 <context>
@@ -458,27 +507,66 @@ Reassign it? That action will be left without a key.</source>
     </message>
 </context>
 <context>
+    <name>CmdAxisFlowCopy</name>
+    <message>
+        <location filename="../src/Command.cpp" line="155"/>
+        <source>Copy</source>
+        <translation>Копирај</translation>
+    </message>
+    <message>
+        <location filename="../src/Command.cpp" line="156"/>
+        <source>Copy the selected objects to another point with the AxisFlow compass; the originals stay where they are</source>
+        <translation>Копира изабране објекте у другу тачку помоћу AxisFlow компаса; оригинали остају на месту</translation>
+    </message>
+</context>
+<context>
     <name>CmdAxisFlowDrawLine</name>
     <message>
-        <location filename="../src/Command.cpp" line="157"/>
+        <location filename="../src/Command.cpp" line="257"/>
         <source>Draw line</source>
         <translation>Нацртај линију</translation>
     </message>
     <message>
-        <location filename="../src/Command.cpp" line="158"/>
+        <location filename="../src/Command.cpp" line="258"/>
         <source>Draw a polyline using the AxisFlow compass (Escape starts a new line, backtick ends the command)</source>
         <translation>Цртај полилинију помоћу AxisFlow компаса (Escape почиње нову линију, обрнути апостроф завршава команду)</translation>
     </message>
 </context>
 <context>
+    <name>CmdAxisFlowExtrude</name>
+    <message>
+        <location filename="../src/Command.cpp" line="186"/>
+        <source>Extrude</source>
+        <translation>Извуци</translation>
+    </message>
+    <message>
+        <location filename="../src/Command.cpp" line="187"/>
+        <source>Sweep a planar wire into a surface. The compass stands up along the wire&apos;s normal, so the height can be typed instead of dragged. A non-planar wire cannot be picked</source>
+        <translation>Извуци равну жицу у површину. Компас се усправља дуж нормале жице, па се висина може унети уместо превлачења. Неравна жица не може бити изабрана</translation>
+    </message>
+</context>
+<context>
+    <name>CmdAxisFlowMove</name>
+    <message>
+        <location filename="../src/Command.cpp" line="123"/>
+        <source>Move</source>
+        <translation>Помери</translation>
+    </message>
+    <message>
+        <location filename="../src/Command.cpp" line="124"/>
+        <source>Move the selected objects with the AxisFlow compass. With nothing selected, the first click picks the object and doubles as the base point</source>
+        <translation>Помера изабране објекте помоћу AxisFlow компаса. Ако ништа није изабрано, први клик бира објекат и уједно је базна тачка</translation>
+    </message>
+</context>
+<context>
     <name>CmdAxisFlowSettings</name>
     <message>
-        <location filename="../src/Command.cpp" line="195"/>
+        <location filename="../src/Command.cpp" line="295"/>
         <source>Settings</source>
         <translation>Подешавања</translation>
     </message>
     <message>
-        <location filename="../src/Command.cpp" line="196"/>
+        <location filename="../src/Command.cpp" line="296"/>
         <source>Open the AxisFlow settings (changes apply live)</source>
         <translation>Отвори AxisFlow подешавања (измене се примењују одмах)</translation>
     </message>
@@ -486,12 +574,12 @@ Reassign it? That action will be left without a key.</source>
 <context>
     <name>CmdAxisFlowToggleLiveLine</name>
     <message>
-        <location filename="../src/Command.cpp" line="119"/>
+        <location filename="../src/Command.cpp" line="219"/>
         <source>Toggle live line</source>
         <translation>Укључи/искључи живу линију</translation>
     </message>
     <message>
-        <location filename="../src/Command.cpp" line="120"/>
+        <location filename="../src/Command.cpp" line="220"/>
         <source>Show or hide the live guide line from the compass centre to the cursor</source>
         <translation>Прикажи или сакриј линију водиљу од центра компаса до курсора</translation>
     </message>

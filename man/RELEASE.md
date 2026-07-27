@@ -26,9 +26,13 @@ vice-versa. Therefore:
   (state exactly which one), and
 - **test the ZIP on a clean install** of that FreeCAD before publishing.
 
-Name releases accordingly, e.g. `AxisFlow-0.2.0-win64-FC1.1.zip`.
+Name releases accordingly, e.g. `AxisFlow-0.2.1-win64-FC1.1.zip`.
 
 ## Cutting a release (maintainer)
+
+0. On a fresh clone, run `run_tests.bat` FIRST: it is the only script that
+   configures CMake. `stage_dist.bat` (and so `make_release.bat` and
+   `build_installer.bat`) only builds an already-configured `build\` tree.
 
 1. Bump the version in ALL of these -- they drift apart otherwise:
    `package.xml` (`<version>` and `<date>`), `CMakeLists.txt` (`project(...)`),
@@ -39,8 +43,10 @@ Name releases accordingly, e.g. `AxisFlow-0.2.0-win64-FC1.1.zip`.
 2. Refresh the translations (`python update_translations.py`) and translate
    anything it leaves marked `type="unfinished"`; the `.qm` files are what
    actually ship.
-3. Build + run the tests once (`run_tests.bat`), and the offline demo harness
-   (`python3 tests/demo_arc_harness.py`).
+3. Build + run the tests once (`run_tests.bat`), and ALL the offline harnesses:
+   `python3 tests/demo_arc_harness.py`, `tests/transform_harness.py` and
+   `tests/extrude_harness.py`. They need nothing but python3, so there is no
+   excuse for skipping one.
 4. Build the module and package it:
    ```bat
    cmake --build build --config RelWithDebInfo --target AxisFlow
@@ -48,14 +54,15 @@ Name releases accordingly, e.g. `AxisFlow-0.2.0-win64-FC1.1.zip`.
    ```
    This produces `AxisFlow-<version>-win64-FC1.1.zip` containing a single
    `AxisFlow\` folder with the runtime files only (the `.pyd`, the `.py` glue
-   including `axisflow_snapping.py`, `Resources\`, `translations\*.qm`,
+   including `axisflow_snapping.py`, `axisflow_demo.py`, `axisflow_transform.py`,
+   `axisflow_settings.py`, `Resources\`, `translations\*.qm`,
    `hotkeys.ini`, `package.xml`) — no sources, tests, or build artifacts.
    `stage_dist.bat` / `stage_dist.sh` are the single source of truth for that
    list: **every newly shipped file must be added there and to the CMake
    `install()` rules**, or it will be missing from installs (this has bitten us
    with the translations and with `package.xml`).
 5. Test the ZIP on a clean FreeCAD (unzip into `Mod`, restart, use it).
-6. On GitHub: create a **tag** (e.g. `v0.2.0`) and a **Release**, attach the ZIP,
+6. On GitHub: create a **tag** (e.g. `v0.2.1`) and a **Release**, attach the ZIP,
    paste install instructions + which FreeCAD build it targets.
 
 ## Installing (end users)

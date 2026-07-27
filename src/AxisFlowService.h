@@ -157,13 +157,41 @@ public:
     // ---------------------------------------------------------------------
     void setOrigin(const Base::Vector3d& o);
 
-    /** Set compass / working-plane orientation from an orthonormal basis. */
+    /** Set compass / working-plane orientation from an orthonormal basis.
+     *  The three vectors are normalised but NOT orthogonalised: localOf()
+     *  inverts the compass matrix by transposing it, which is only correct for
+     *  an orthonormal frame, so a skewed triple gives a silently skewed
+     *  coordinate system. Build the basis with alignCompassX() unless you
+     *  already hold a known-orthonormal one (a working plane, say). */
     void setPlane(const Base::Vector3d& uDir,
                   const Base::Vector3d& vDir,
                   const Base::Vector3d& normal);
 
+    /** Point the compass X (u) axis along dir and derive v / normal from it.
+     *  The safe way to aim the compass at a direction you computed: the
+     *  remaining two axes are built orthonormal, and a dir parallel to world Z
+     *  is handled instead of collapsing. Used by the extrude tool to stand the
+     *  compass up along a wire's normal. */
+    void alignCompassX(const Base::Vector3d& dir);
+
     /** Reset compass orientation back to world axes. */
     void resetPlane();
+
+    /** Hide or show the COMPASS ONLY, leaving the coordinate panel up and the
+     *  service running.
+     *
+     *  This is display state, not activation. deactivate() cannot serve the
+     *  purpose: it also hides the panel, it changes whether constraints apply,
+     *  and -- the trap that made the Python-only attempt fail -- AxisFlowTool::
+     *  activate() calls AxisFlowService::activate() itself, so the very next
+     *  getPoint() switched the compass straight back on.
+     *
+     *  Used by the transform tools while they wait for the user to pick an
+     *  object: there is nothing to aim yet and the compass is only in the way.
+     *  Transient by design and deliberately NOT persisted -- a hidden compass
+     *  must never survive into the next session. */
+    void setCompassHidden(bool hidden);
+    bool compassHidden() const { return _compassHidden; }
 
     void setMode(CompassMode m);
     void toggleMode();
@@ -300,6 +328,12 @@ Q_SIGNALS:
     void stateChanged();
     /** Active state toggled on/off (UI shows/hides in response). */
     void activeChanged(bool active);
+
+    /** Compass-only visibility changed. Separate from stateChanged() on
+     *  purpose: that one fires on every mouse move, and re-evaluating
+     *  visibility per frame would write a Coin field 60 times a second for no
+     *  reason. */
+    void compassHiddenChanged(bool hidden);
     /** A point was committed as the new origin. */
     void pointConfirmed(Base::Vector3d worldPt);
     /** A consumer/tool should end the current drawing command (CancelCommand). */
@@ -327,6 +361,7 @@ private:
     AxisFlowSolver _solver;
     Hotkeys        _hotkeys;
     bool           _active { false };
+    bool           _compassHidden { false };
     bool           _constrainEnabled { true };   // off in the Draft adapter
     AxisLock       _displayLock { AxisLock::None };  // adapter-only mirror
     bool           _hasFollowRef { false };          // a previous point exists

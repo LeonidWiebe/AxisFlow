@@ -101,6 +101,106 @@ bool CmdAxisFlowActivate::isActive()
 
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Transform commands. The geometry work lives in axisflow_transform.py -- the
+// core creates and modifies nothing; these are ordinary getPoint consumers.
+// ---------------------------------------------------------------------------
+
+class CmdAxisFlowMove : public Gui::Command
+{
+public:
+    CmdAxisFlowMove();
+    const char* className() const override { return "CmdAxisFlowMove"; }
+protected:
+    void activated(int iMsg) override;
+    bool isActive() override;
+};
+CmdAxisFlowMove::CmdAxisFlowMove()
+    : Gui::Command("AxisFlow_Move")
+{
+    sAppModule   = "AxisFlow";
+    sGroup       = "AxisFlow";
+    sMenuText    = QT_TR_NOOP("Move");
+    sToolTipText = QT_TR_NOOP("Move the selected objects with the AxisFlow compass. "
+                              "With nothing selected, the first click picks the object "
+                              "and doubles as the base point");
+    sWhatsThis   = "AxisFlow_Move";
+    sStatusTip   = sToolTipText;
+    sPixmap      = "AxisFlow_Move";
+}
+void CmdAxisFlowMove::activated(int)
+{
+    doCommand(Gui::Command::Gui,
+              "import axisflow_transform\naxisflow_transform.move()");
+}
+bool CmdAxisFlowMove::isActive()
+{
+    return Gui::Application::Instance->activeDocument() != nullptr;
+}
+
+class CmdAxisFlowCopy : public Gui::Command
+{
+public:
+    CmdAxisFlowCopy();
+    const char* className() const override { return "CmdAxisFlowCopy"; }
+protected:
+    void activated(int iMsg) override;
+    bool isActive() override;
+};
+CmdAxisFlowCopy::CmdAxisFlowCopy()
+    : Gui::Command("AxisFlow_Copy")
+{
+    sAppModule   = "AxisFlow";
+    sGroup       = "AxisFlow";
+    sMenuText    = QT_TR_NOOP("Copy");
+    sToolTipText = QT_TR_NOOP("Copy the selected objects to another point with the "
+                              "AxisFlow compass; the originals stay where they are");
+    sWhatsThis   = "AxisFlow_Copy";
+    sStatusTip   = sToolTipText;
+    sPixmap      = "AxisFlow_Copy";
+}
+void CmdAxisFlowCopy::activated(int)
+{
+    doCommand(Gui::Command::Gui,
+              "import axisflow_transform\naxisflow_transform.copy()");
+}
+bool CmdAxisFlowCopy::isActive()
+{
+    return Gui::Application::Instance->activeDocument() != nullptr;
+}
+
+class CmdAxisFlowExtrude : public Gui::Command
+{
+public:
+    CmdAxisFlowExtrude();
+    const char* className() const override { return "CmdAxisFlowExtrude"; }
+protected:
+    void activated(int iMsg) override;
+    bool isActive() override;
+};
+CmdAxisFlowExtrude::CmdAxisFlowExtrude()
+    : Gui::Command("AxisFlow_Extrude")
+{
+    sAppModule   = "AxisFlow";
+    sGroup       = "AxisFlow";
+    sMenuText    = QT_TR_NOOP("Extrude");
+    sToolTipText = QT_TR_NOOP("Sweep a planar wire into a surface. The compass stands "
+                              "up along the wire's normal, so the height can be typed "
+                              "instead of dragged. A non-planar wire cannot be picked");
+    sWhatsThis   = "AxisFlow_Extrude";
+    sStatusTip   = sToolTipText;
+    sPixmap      = "AxisFlow_Extrude";
+}
+void CmdAxisFlowExtrude::activated(int)
+{
+    doCommand(Gui::Command::Gui,
+              "import axisflow_extrude\naxisflow_extrude.extrude()");
+}
+bool CmdAxisFlowExtrude::isActive()
+{
+    return Gui::Application::Instance->activeDocument() != nullptr;
+}
+
 class CmdAxisFlowToggleLiveLine : public Gui::Command
 {
 public:
@@ -217,6 +317,9 @@ void CreateAxisFlowCommands()
     Gui::CommandManager& mgr = Gui::Application::Instance->commandManager();
     mgr.addCommand(new CmdAxisFlowActivate());
     mgr.addCommand(new CmdAxisFlowDrawLine());
+    mgr.addCommand(new CmdAxisFlowMove());
+    mgr.addCommand(new CmdAxisFlowCopy());
+    mgr.addCommand(new CmdAxisFlowExtrude());
     mgr.addCommand(new CmdAxisFlowToggleLiveLine());
     mgr.addCommand(new CmdAxisFlowSettings());
 }

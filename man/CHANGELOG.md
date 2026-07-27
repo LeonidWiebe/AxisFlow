@@ -7,9 +7,170 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 While the project is in `0.x` (alpha), the public API may still change between
 minor releases.
 
+## [0.2.1] - 2026-07-27
+
+### Added
+- **Extrude command** (`AxisFlow_Extrude`, `axisflow_extrude.py`): sweep a planar
+  wire into a surface. Picking the wire stands the compass up along its normal,
+  so the compass **X axis is the sweep** and the height is typed (`X`, `150`,
+  Enter) rather than dragged for. The surface grows live while the cursor moves.
+  Letting the cursor wander off the axis gives an oblique extrusion on purpose --
+  `X` or SmartLock is how you ask for square. The result is a parametric
+  `Part::Extrusion` with `Solid = False`, direction in `Dir` and height in
+  `LengthFwd`, so the height stays a single editable number afterwards. The core
+  still creates nothing: this is an ordinary `getPoint()` consumer.
+- `AxisFlow.alignCompassX(direction)`: aim the compass X axis at a direction and
+  derive the other two axes orthonormal from it. The solver had carried
+  `alignCompassX()` since the beginning but never called or exposed it. It is the
+  safe counterpart to `setPlane()`, which normalises its three vectors but does
+  **not** orthogonalise them -- and the solver inverts the compass matrix by
+  transposing it, so a skewed triple silently yields a skewed coordinate system.
+- `TransformTool` gained `pick_consumes_point`, `modules`, `on_objects_ready()`
+  and `on_end()`. Move and Copy keep spending the picking click on the base point;
+  a tool that must inspect the object before it can accept a point (Extrude has to
+  know the wire before it can aim the compass) now opts out instead of forking the
+  machine.
+- **Move animation for the compass.** Re-anchoring used to be an instant jump.
+  It now cross-fades: a ghost frozen at the old anchor fades out while the live
+  compass fades in at the new one, simultaneously, so the compass reads as
+  travelling rather than teleporting. Timing comes from the existing
+  `CompassRotateAnimation` setting, which now drives both animations (one timer,
+  two independent clocks — they overlap whenever a confirm both re-anchors and
+  re-aims). The ghost is a deep copy of the compass body taken when the move
+  starts, so it needs no syncing; the live line, the path and the indexing
+  markers stay out of it, since a ghost drawing a live line from a stale anchor
+  to the current cursor would look like a bug.
+  The body's `SoBaseColor` nodes became `SoMaterial` to make this possible:
+  `SoBaseColor` has no transparency field. Under the compass's `BASE_COLOR`
+  light model the rendered colour is the diffuse colour, so the output is
+  unchanged. A per-subtree transparency override was the obvious alternative and
+  is not available — in Coin the override bits for diffuse colour and
+  transparency are deliberately the same bit (to match SGI/TGS Inventor), so
+  forcing transparency would flatten the red and green axes to one colour.
+- `CompassAnimation` (Bool, default true): turn the compass animation off
+  entirely. Off restores the pre-animation behaviour exactly — the checkbox is
+  folded into the duration, so every path in the compass takes the branch it
+  already had for a zero duration: instant rotation, instant jump, no ghost, no
+  deep copy, no timer scheduled. It exists because the fade costs frames while a
+  line is being drawn, and a half-disabled animation would still pay them.
+- **Pick mode** for Move, Copy and Extrude. While the command is waiting for an
+  object the compass steps aside — there is nothing to aim yet and it is only in
+  the way — and the cursor becomes an arrow with a target tail, MicroStation's
+  "locate" made explicit. The instant the object is known the compass comes back
+  and normal input begins. The coordinate panel stays up throughout.
+  Cleared on every exit path, Escape mid-pick included, and the service clears it
+  on deactivate() as well, so an abort cannot strand the user without a compass.
+- Escape cancels **Extrude**. The key stays bound to `FinishLine` globally —
+  for the line command that means "finish this polyline and keep drawing", which
+  is worth more than uniformity — but Extrude overrides what finishing means: it
+  has nothing partial worth keeping, so it ends and takes the preview with it.
+  Backtick (`CancelCommand`) still works everywhere, and Move and Copy keep
+  treating Escape as "start this one over".
+- Extrude anchors the compass at the point of the wire **nearest where it was
+  picked**, instead of at vertex zero, which on a long wall put the compass
+  metres from where the user was looking. The 3D hit point now travels from
+  `getObjectInfo` through `TransformTool.pick_point`, and is projected onto the
+  wire with `distToShape` rather than used raw: the hit comes back through Coin
+  in single precision and a wire is picked with a tolerance, so it lands near
+  the wire rather than on it, and projecting also clamps to the wire's ends.
+  A selection made before the command started was never clicked, so it still
+  anchors at the first vertex.
+- `AxisFlow.setCompassVisible(bool)`: hide or show the **compass only**, leaving
+  the coordinate panel up and the service running. Display state, not activation.
+  The first attempt at pick mode used `deactivate()` and silently did nothing,
+  which is worth recording: `AxisFlowTool::activate()` calls
+  `AxisFlowService::activate()` itself, so the `getPoint()` immediately after the
+  hide switched the compass straight back on. `AlwaysShowCompass` outranks the
+  hide — an explicit instruction beats a convenience.
+- `tests/extrude_harness.py`: offline check of the sweep direction, the planarity
+  refusal, the selection gate's lifetime, the point accounting, the emitted
+  command string and the preview's quad bookkeeping -- 18 assertions, no FreeCAD.
+
+### Fixed
+- **Lines drawn flat with the compass were rejected as non-planar by Extrude.**
+  Two causes, compounding. First, the real one: the cursor is unprojected onto
+  the compass plane through Coin's single-precision types — `SbVec3f`, `SbLine`,
+  `SbPlane`, with the plane's own origin and normal downcast from double on the
+  way in. A float carries about seven significant digits, so at metre-scale
+  coordinates the intersection landed ~5e-5 mm off the plane, and the solver
+  passes that out-of-plane component straight through whenever Z is not locked.
+  Every point of a polyline picked up its own offset, so the finished wire was
+  not planar in the exact sense. The tool now snaps the unprojected point onto
+  the plane in double precision, which brings the residual to ~1e-13 mm.
+  Second: the check asked with OCC's default confusion of about 1e-7 — 500x
+  tighter than the drift — so it could not have passed. The tolerance is now
+  scaled to the wire, a millionth of its bounding-box diagonal (about a micron
+  on a metre-long wire), which also rescues drawings made before the fix. The
+  same tolerance goes to the straightness test on purpose: a dead-straight line
+  carrying noise is not exactly straight, and a strict straightness test would
+  drop it into `find_plane()`, which asked loosely would return a plane with an
+  arbitrary normal — the "privileged directions" trap Draft warns about.
+  Genuinely skew wires are still refused; an out-of-plane point from an object
+  snap is still passed through rather than flattened.
+- `stage_dist.bat` located the built `.pyd` with `for /r ... in (AxisFlow.pyd)`,
+  which does not search: given a set with no wildcard, `for /r` simply prepends
+  every directory under the tree to the name, existing or not. `PYD` therefore
+  ended up as whichever directory the filesystem enumerated last — typically
+  `build\ZERO_CHECK.dir\RelWithDebInfo\` — and the copy failed on a path that
+  was never there. It had been working only by luck of enumeration order. The
+  canonical `build\bin\<CONFIG>\` is now checked first, and the fallback search
+  tests `if exist`. The Linux script was never affected: it uses `find`.
+- The compass grew a hard dark ring the moment the move animation landed. Cause
+  was the `SoBaseColor` → `SoMaterial` swap that made the fade possible:
+  `SoBaseColor` sets only the diffuse colour, so the contour outline used to
+  INHERIT the fill's transparency from the material above it, while `SoMaterial`
+  brings its own `transparency` field defaulting to 0 — which reset the outline
+  to fully opaque. The outline now carries the fill's colour and tracks its
+  transparency, so it reads as part of the compass rather than a border around
+  it. `kOutlineColor` is kept in the source for whoever wants the ring back.
+- The animation tick rebuilt the guide line 60 times a second even when only the
+  move fade was running, which cannot change it — the anchor reaches its final
+  position before the first tick, and the fade only rewrites transparencies. It
+  landed on the worst possible workload: drawing a polyline re-anchors the
+  compass after every point, so a long line paid a rebuild storm per segment.
+  The guide is now rebuilt only while the frame is actually turning.
+- The NSIS installer shipped without `axisflow_transform.py`, so installer builds
+  offered Move and Copy buttons whose commands died on `ModuleNotFoundError`. The
+  duplicated file list is gone entirely: the script now ships the staged tree
+  verbatim (`File /r`), which is what `stage_dist.bat` was already the single
+  source of truth for. The same rot had silently dropped `CHANGELOG.md`, whose
+  path had gone stale behind a `/nonfatal`.
+- The resources directory was `resources/` on disk while CMake, `InitGui.py`,
+  `package.xml` and the installer all spelled it `Resources/`. Invisible on
+  Windows, broken on any case-sensitive filesystem -- i.e. exactly the Linux
+  packaging path. Renamed, and the lowercase fallback in `stage_dist.sh` dropped.
+- Three `viewer` dereferences in `AxisFlowTool` were unguarded while three others
+  were checked. A live `QPointer` only proves the view's QObject survives, not its
+  Coin side, and teardown is where they part company.
+- `axisflow_snapping.py` documented the precedence chain with indexing above
+  object snapping; the code has it the other way round, and deliberately so
+  ("Object snap wins over indexing" in `AxisFlowIndexing.h`).
+
+### Changed
+- The settings table now lives **only** in README.md. The copy in the handoff
+  notes had drifted on thirteen of twenty-one defaults and was missing five live
+  options. `TestAxisFlow.test_readme_settings_table_matches_the_defaults` parses
+  the README table and compares it against `getDefaultSettings()`, so a changed
+  default or a new option cannot ship with the docs quietly disagreeing.
+
 ## [0.2.0] - 2026-07-24
 
 ### Added
+- **Move and Copy commands** driven by the compass (`AxisFlow_Move`,
+  `AxisFlow_Copy`). Pick a base point, then a target -- and because the compass
+  anchors on the base point, the second one is normally *typed* as a
+  displacement (press X, type 150, Enter) rather than hunted for with the
+  mouse. With objects already selected they are used; with nothing selected the
+  first click both picks the object under the cursor and serves as the base
+  point, so one click does what Draft asks two for. Preview is a Draft ghost,
+  the change is committed as a `Draft.move(...)` command string (undo stack and
+  Python console both get it), and the commit is deferred out of the event
+  callback. Implemented in `axisflow_transform.py` -- an ordinary `getPoint()`
+  consumer, on a base class (`TransformTool`) sized for Rotate, Scale and Array
+  to follow.
+- `AxisFlow.getCursorPixel()` -- the cursor position in view pixels, so a
+  consumer can ask `View.getObjectInfo()` what is under it. Picking an object
+  is a screen-space question that the world point cannot answer.
 - Translations updated for everything new in this release: 18 strings across
   all eight languages (de, fr, hi, hu, ko, ru, sr, zh-CN), recompiled to `.qm`.
   `update_translations.py` now does the extraction in a single `lupdate` pass
@@ -405,6 +566,7 @@ with FreeCAD [Package Metadata](https://wiki.freecad.org/Package_Metadata)
 > the entry above describes the project's state at that point rather than a
 > granular per-release diff.
 
+[0.2.1]: https://github.com/LeonidWiebe/AxisFlow/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/LeonidWiebe/AxisFlow/compare/v0.1.2...v0.2.0
 [0.1.3]: https://github.com/LeonidWiebe/AxisFlow/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/LeonidWiebe/AxisFlow/compare/v0.1.1...v0.1.2

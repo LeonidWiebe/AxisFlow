@@ -35,6 +35,7 @@ constexpr unsigned long kDefColorY = D::axisColorY;
 constexpr unsigned long kDefActiveField = D::activeFieldColor;
 constexpr double kDefFillTransp    = D::fillTransparency;
 constexpr bool   kDefAlwaysShow    = D::alwaysShowCompass;
+constexpr bool   kDefCompassAnim   = D::compassAnimation;
 constexpr bool          kDefLiveLineEnabled = D::liveLineEnabled;
 constexpr int           kDefLiveLineStyle   = D::liveLineStyle;
 constexpr unsigned long kDefLiveLineColor   = D::liveLineColor;
@@ -148,6 +149,7 @@ void AxisFlowSettings::load()
     _activeFieldColor = g->GetUnsigned("ActiveFieldColor", kDefActiveField);
     _fillTransparency = clamp01(g->GetFloat("FillTransparency", kDefFillTransp));
     _alwaysShowCompass = g->GetBool("AlwaysShowCompass", kDefAlwaysShow);
+    _compassAnimation  = g->GetBool("CompassAnimation", kDefCompassAnim);
     _liveLineEnabled   = g->GetBool("LiveLineEnabled", kDefLiveLineEnabled);
     _liveLineStyle     = static_cast<int>(g->GetInt("LiveLineStyle", kDefLiveLineStyle));
     _liveLineColor     = g->GetUnsigned("LiveLineColor", kDefLiveLineColor);
@@ -193,6 +195,7 @@ void AxisFlowSettings::save()
     g->SetUnsigned("ActiveFieldColor", _activeFieldColor);
     g->SetFloat("FillTransparency", _fillTransparency);
     g->SetBool("AlwaysShowCompass", _alwaysShowCompass);
+    g->SetBool("CompassAnimation", _compassAnimation);
     g->SetBool("LiveLineEnabled", _liveLineEnabled);
     g->SetInt("LiveLineStyle", _liveLineStyle);
     g->SetUnsigned("LiveLineColor", _liveLineColor);
@@ -224,6 +227,7 @@ void AxisFlowSettings::resetDefaults()
     _activeFieldColor  = kDefActiveField;
     _fillTransparency  = kDefFillTransp;
     _alwaysShowCompass = kDefAlwaysShow;
+    _compassAnimation  = kDefCompassAnim;
     _liveLineEnabled   = kDefLiveLineEnabled;
     _liveLineStyle     = kDefLiveLineStyle;
     _liveLineColor     = kDefLiveLineColor;
@@ -322,6 +326,14 @@ void AxisFlowSettings::setFillTransparency(double v)
     if (v == _fillTransparency) return;
     _fillTransparency = v;
     group()->SetFloat("FillTransparency", v);
+    Q_EMIT changed();
+}
+
+void AxisFlowSettings::setCompassAnimation(bool v)
+{
+    if (v == _compassAnimation) return;
+    _compassAnimation = v;
+    group()->SetBool("CompassAnimation", v);
     Q_EMIT changed();
 }
 

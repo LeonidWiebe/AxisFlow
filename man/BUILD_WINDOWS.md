@@ -51,7 +51,8 @@ cmake --install build --config RelWithDebInfo
 ```
 %APPDATA%\FreeCAD\Mod\AxisFlow\AxisFlow.pyd
 %APPDATA%\FreeCAD\Mod\AxisFlow\InitGui.py
-%APPDATA%\FreeCAD\Mod\AxisFlow\axisflow_snap.py, axisflow_demo.py, axisflow_settings.py
+%APPDATA%\FreeCAD\Mod\AxisFlow\axisflow_snapping.py, axisflow_demo.py,
+                                    axisflow_transform.py, axisflow_settings.py
 %APPDATA%\FreeCAD\Mod\AxisFlow\Resources\icons\*.svg
 ```
 

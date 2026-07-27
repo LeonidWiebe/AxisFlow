@@ -2,6 +2,7 @@
 
 #include <Inventor/nodes/SoEventCallback.h>
 #include <Inventor/SbVec3f.h>
+#include <Inventor/SbVec2s.h>
 
 #include <QtCore/QPointer>
 
@@ -66,6 +67,11 @@ public:
      *  destroyed (its document was closed). Callers that cache a session must
      *  check this before reusing it in another document. */
     Gui::View3DInventor* view() const { return _view.data(); }
+
+    /** Last cursor position in view pixels, or (-1,-1) before the first move.
+     *  Consumers need it to ask the view what is UNDER the cursor -- picking an
+     *  object is a screen-space query, and the point we hand them is not. */
+    SbVec2s lastPixel() const { return _lastPixel; }
 
     Base::Vector3d lastPoint() const { return _lastPoint; }
 
@@ -151,6 +157,11 @@ private:
     void detachCameraSensor();
 
     SbVec3f  unprojectToCompassPlane(const SbVec2s& pixel);
+    /** Put a point exactly on the compass plane, in double precision.
+     *  The unprojection above runs through Coin's single-precision types, which
+     *  leaves the result about 1e-4 mm off the plane at metre-scale
+     *  coordinates -- enough for OCC to call a flat polyline non-planar. */
+    Base::Vector3d snapToCompassPlane(const Base::Vector3d& p) const;
     void     confirmPoint();
     void     applyModeToUi();
 
@@ -192,6 +203,7 @@ private:
      * The keyboard path never hit this, which is why ending with the backtick
      * always looked fine: keys arrive through the Qt filter, not through Coin.
      */
+    SbVec2s              _lastPixel { -1, -1 };
     bool                 _inCoinCallback     { false };
     bool                 _deactivateDeferred { false };
 

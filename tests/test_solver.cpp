@@ -438,3 +438,118 @@ TEST(Solver, RotateAboutMovesThePointWithTheFrame)
     s.rotateAboutAxis(0, 90.0);
     expectVec(s.getLocalOffset(), 0, 0, -5);
 }
+
+// ---- alignCompassX --------------------------------------------------------
+// Aiming the compass X axis at a computed direction. Used by the extrude tool,
+// which stands the compass up along a wire's normal so the drag -- and the
+// typed "X 150 Enter" -- runs along the extrusion.
+
+TEST(Solver, AlignCompassXPutsUOnTheGivenDirection)
+{
+    AxisFlowSolver s;
+    s.alignCompassX(V(0, 0, 5));            // length must not matter
+    expectVec(s.getPlaneU(), 0, 0, 1);
+}
+
+TEST(Solver, AlignCompassXBuildsAnOrthonormalFrame)
+{
+    // The point of the helper: setPlane() normalises but does not
+    // orthogonalise, and localOf() inverts the matrix by transposing it, so a
+    // skewed frame would silently give wrong coordinates.
+    AxisFlowSolver s;
+    s.alignCompassX(V(1, 2, 3));
+    const Base::Vector3d u = s.getPlaneU();
+    const Base::Vector3d v = s.getPlaneV();
+    const Base::Vector3d n = s.getPlaneNormal();
+    EXPECT_NEAR(u.Length(), 1.0, kEps);
+    EXPECT_NEAR(v.Length(), 1.0, kEps);
+    EXPECT_NEAR(n.Length(), 1.0, kEps);
+    EXPECT_NEAR(u.Dot(v), 0.0, kEps);
+    EXPECT_NEAR(u.Dot(n), 0.0, kEps);
+    EXPECT_NEAR(v.Dot(n), 0.0, kEps);
+}
+
+TEST(Solver, AlignCompassXSurvivesADirectionAlongWorldZ)
+{
+    // The degenerate case the helper exists to handle: "up" defaults to world
+    // Z, so a dir parallel to it would collapse the cross product. A vertical
+    // wire normal is exactly that, and it is not exotic -- it is any wire drawn
+    // on the XY plane.
+    AxisFlowSolver s;
+    s.alignCompassX(V(0, 0, 1));
+    const Base::Vector3d u = s.getPlaneU();
+    const Base::Vector3d v = s.getPlaneV();
+    const Base::Vector3d n = s.getPlaneNormal();
+    expectVec(u, 0, 0, 1);
+    EXPECT_NEAR(v.Length(), 1.0, kEps);
+    EXPECT_NEAR(n.Length(), 1.0, kEps);
+    EXPECT_NEAR(u.Dot(v), 0.0, kEps);
+    EXPECT_NEAR(u.Dot(n), 0.0, kEps);
+}
+
+TEST(Solver, AlignCompassXMakesTheDragReadAsX)
+{
+    // What the extrude tool actually depends on: after aiming the compass at
+    // the normal, a cursor 40 along that normal reads as local X = 40, so the
+    // panel's X field IS the extrusion length.
+    AxisFlowSolver s;
+    s.setOrigin(V(1, 1, 0));
+    s.alignCompassX(V(0, 0, 1));
+    s.setRawPoint(V(1, 1, 40));
+    expectVec(s.getLocalOffset(), 40, 0, 0);
+}
+
+TEST(Solver, AlignCompassXIsStableAcrossRepeats)
+{
+    // Re-aiming at the same direction must not drift the other two axes: the
+    // extrude tool re-aims whenever the selection changes.
+    AxisFlowSolver s;
+    s.alignCompassX(V(0, 1, 0));
+    const Base::Vector3d v1 = s.getPlaneV();
+    const Base::Vector3d n1 = s.getPlaneNormal();
+    s.alignCompassX(V(0, 1, 0));
+    expectVec(s.getPlaneV(), v1.x, v1.y, v1.z);
+    expectVec(s.getPlaneNormal(), n1.x, n1.y, n1.z);
+}
+
+// ---- planarity ------------------------------------------------------------
+// Points picked in the 3D view are unprojected through Coin's single-precision
+// types, which left them ~5e-5 mm off the compass plane at metre-scale
+// coordinates -- 500x OCC's default confusion of 1e-7, so a polyline drawn flat
+// was rejected as non-planar by the extrude command. The tool now snaps the raw
+// point onto the plane in double precision before handing it over; these pin the
+// solver's half of the contract, that a raw point ON the plane stays on it.
+
+TEST(Solver, SolvedPointStaysOnThePlane)
+{
+    AxisFlowSolver s;
+    // A tilted plane with a far-from-origin anchor: the case that hurt, since
+    // float error scales with the magnitude of the coordinates.
+    Base::Vector3d n(0.1, 0.2, 0.97);
+    n.Normalize();
+    s.alignCompassX(V(1, 0, 0));
+    s.setOrigin(V(1200, -800, 350));
+    const Base::Vector3d o = s.getOrigin();
+    const Base::Vector3d u = s.getPlaneU();
+    const Base::Vector3d v = s.getPlaneV();
+    const Base::Vector3d nn = s.getPlaneNormal();
+
+    for (int i = 1; i <= 20; ++i) {
+        const double a = i * 137.0, b = i * -91.0;
+        s.setRawPoint(o + u * a + v * b);           // exactly on the plane
+        const Base::Vector3d p = s.getSolvedPoint();
+        EXPECT_NEAR((p - o).Dot(nn), 0.0, 1e-9);
+    }
+}
+
+TEST(Solver, AnOutOfPlaneRawPointIsNotSilentlyFlattened)
+{
+    // The other half: when a point IS genuinely off the plane -- an object snap
+    // to an endpoint above it -- the solver must pass that through. Flattening
+    // everything would have been the lazy fix for the drift and would have
+    // broken snapping to geometry off the working plane.
+    AxisFlowSolver s;
+    s.setOrigin(V(0, 0, 0));
+    s.setRawPoint(V(3, 4, 25));
+    EXPECT_NEAR(s.getSolvedPoint().z, 25.0, kEps);
+}

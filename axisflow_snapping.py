@@ -6,8 +6,13 @@ exactly as everywhere else, share the same toolbar state and draw the same
 markers. This module is the thin Python layer the C++ tool calls on each mouse
 move (marshalling plain floats keeps the C++ side free of App.Vector juggling).
 
-Precedence inside AxisFlow, later winning: raw cursor -> object snap ->
-indexing -> axis lock -> typed value. Snapping is deliberately queried with
+Precedence inside AxisFlow, later winning: raw cursor -> indexing -> object
+snap -> axis lock -> typed value. Note that the object snap outranks indexing
+and not the other way round: a snap is an explicit geometric target, indexing
+only a soft guide, so it must not drag the point off a real endpoint (see the
+"Object snap wins over indexing" branch in AxisFlowIndexing.h). The one
+exception is axis hold -- a cursor hugging an axis keeps the snapped point on
+that axis. Snapping is deliberately queried with
 constrain=False: constraining is AxisFlow's job, and letting Draft do it too
 would apply it twice.
 """

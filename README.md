@@ -1,6 +1,6 @@
 # AxisFlow Workbench for FreeCAD
 
-version 0.2.0 (alpha)
+version 0.2.1 (alpha)
 
 **AxisFlow** is a precision drawing assistant for FreeCAD, inspired by the workflow concept of **MicroStation AccuDraw**.
 
@@ -28,7 +28,7 @@ It supplies the input half of a drawing tool: the compass anchored at a referenc
 
 That separation is the whole design. Any workbench, command, or macro can use AxisFlow through its Python API without AxisFlow knowing anything about it — the dependency runs one way only. A consumer is free to build its geometry with whatever it likes, including FreeCAD's own `Draft.make_line` / `make_wire` / `make_circle`, which live in `draftmake/*` and touch neither `Snapper` nor `DraftToolBar`.
 
-Consequently AxisFlow ships no Line, Rectangle, Arc or Circle commands, and none are planned. A single demo command (`axisflow_demo.line()`) exists purely as an end-to-end test of the input cycle -- it lives outside the core and builds its geometry with `Draft.make_wire`, drawing its own live preview with a small self-owned Coin node.
+Consequently the core ships no drawing primitives -- no Line, Rectangle, Arc or Circle -- and none are planned. What AxisFlow *does* ship are consumers built on that API, all outside the core: a demo line command (`axisflow_demo.line()`, which now also draws arc segments and can snap to itself), the Move / Copy commands (`axisflow_transform.py`) and Extrude (`axisflow_extrude.py`). They build geometry with `Draft.make_wire`, `Part.Wire`, `Draft.move` and `Part::Extrusion`, and draw their own previews with self-owned Coin nodes or Draft ghosts. They are examples of the API, not part of it.
 
 ## Why not build on Draft's input
 
@@ -212,7 +212,7 @@ RotateAboutX = R X             ; one chord
 
 All options are stored in FreeCAD's own parameter tree under `User parameter:BaseApp/Preferences/Mod/AxisFlow`. That is an XML file (`user.cfg`) in the user's config directory: always writable, surviving a module reinstall, readable identically from C++ and Python. Every option is also reachable from Python via `AF.getSettings()` / `AF.setSetting(name, value)`.
 
-The **Settings** command (`AxisFlow_Settings`, gear icon) opens a live, non-modal editor. Options are grouped into sections listed on the left (**Compass** / **Live Line**), each a two-column grid of name → value where the value widget matches the option's type (check box, combo, number spin, colour picker). Every change applies **on the fly** — there is no OK button — so the compass and panel update as you edit. It is a thin Python/PySide dialog (`axisflow_settings.py`); adding a future option is one row in the relevant section of `_SECTIONS` plus a getter/setter in `AxisFlowSettings`. The interface language follows FreeCAD's (see the **Language** section).
+The **Settings** command (`AxisFlow_Settings`, gear icon) opens a live, non-modal editor. Options are grouped into sections listed on the left (**Compass** / **Live Line** / **Behaviour** / **Hotkeys**), each a two-column grid of name → value where the value widget matches the option's type (check box, combo, number spin, colour picker). Every change applies **on the fly** — there is no OK button — so the compass and panel update as you edit. It is a thin Python/PySide dialog (`axisflow_settings.py`); adding a future option is one row in the relevant section of `_SECTIONS` plus a getter/setter in `AxisFlowSettings`. The interface language follows FreeCAD's (see the **Language** section).
 
 | Key | `setSetting` name | Type | Default | Meaning |
 |---|---|---|---|---|
@@ -229,19 +229,25 @@ The **Settings** command (`AxisFlow_Settings`, gear icon) opens a live, non-moda
 | `LiveLineStyle` | `liveLineStyle` | Int | 0 | 0 = solid, 1 = dashed, 2 = dotted, 3 = dash-dot |
 | `LiveLineColor` | `liveLineColor` | Unsigned | `0x00AAFFFF` | live guide line colour (`0xRRGGBBAA`) |
 | `LiveLineTransparency` | `liveLineTransparency` | Float | 0.50 | transparency of the live guide line (0..1) |
+| `CompassPathEnabled` | `compassPathEnabled` | Bool | true | draw the "compass path": a thin poly-line from the compass centre through the prospective point to the snap, broken into a leg per axis. Shown while a snap is live or any field is frozen |
+| `CompassPathStyle` | `compassPathStyle` | Int | 1 | 0 = solid, 1 = dashed, 2 = dotted, 3 = dash-dot |
+| `CompassPathColor` | `compassPathColor` | Unsigned | `0xC8C8C8FF` | compass path colour (`0xRRGGBBAA`), light grey by default |
 | `UseDistanceIndexing` | `useDistanceIndexing` | Bool | true | snap the live-line length to the last-entered "indexed distance" |
 | `UseAxesIndexing` | `useAxesIndexing` | Bool | true | snap the live line onto the nearest X/Y axis |
 | `IndexingTolerance` | `indexingTolerance` | Int | 15 | snap tolerance, pixels (0..50) |
 | `IndexingAxisWeight` | `indexingAxisWeight` | Int | 8 | candidate-axis line thickness, pixels |
 | `IndexingAxisTransparency` | `indexingAxisTransparency` | Float | 0.50 | transparency of the candidate-axis line (0..1) |
-| `CompassRotateAnimation` | `compassRotateAnimation` | Float | 0.5 | compass rotation easing in seconds (0 = instant, clamped to 0–2). Display only: the solver switches planes immediately, the compass sweeps after it |
+| `CompassAnimation` | `compassAnimation` | Bool | true | animate the compass at all. Off restores the pre-animation behaviour exactly — the compass jumps to its new plane and anchor with no easing, no cross-fade and no timer running. Worth turning off on a slow machine: the fade costs frames, and drawing a polyline re-anchors the compass after every point |
+| `CompassRotateAnimation` | `compassRotateAnimation` | Float | 0.5 | how long that animation takes, in seconds (0 = instant, clamped to 0–2; ignored when `CompassAnimation` is off). Drives both movements: a plane change sweeps, and a change of anchor cross-fades — the compass dissolves out of the old position and into the new one at the same time. Display only: the solver switches plane and origin immediately, the compass catches up |
 | `CompassFollowDirection` | `compassFollowDirection` | Int | 0 | after a confirmed point, align the compass +X with the segment just drawn: 0 = off, 1 = on keeping Z (in-plane rotation), 2 = on fully (the normal stays as close to the old one as possible) |
 | `FocusAdvanceOnMove` | `focusAdvanceOnMove` | Bool | true | after typing a value into an in-plane field, a deliberate cursor move (>6 px) finishes the entry and moves the caret to the adjacent field (X <-> Y, D <-> A) |
 | `SmartNegativeDirection` | `smartNegativeDirection` | Bool | true | a bare magnitude typed into a local field takes the sign of the cursor's direction along that axis; off = the typed sign is literal |
 | `UseSnapping` | `useSnapping` | Bool | true | use FreeCAD (Draft) object snapping inside AxisFlow tools |
 | `Hotkey.<Action>` | — | ASCII | see above | comma-separated Qt key codes; empty = unbound |
 
-Actions used as `Hotkey.<Action>` keys: `ToggleActive`, `ToggleMode`, `SmartLock`, `LockX`, `LockY`, `LockZ`, `LockD`, `SetOrigin`, `RotateTop`, `RotateFront`, `RotateSide`, `RotateByView`, `RotateCycle`, `ClearLocks`, `CancelEntry`, `CancelCommand`, `FinishLine`, `ConfirmPoint`.
+Actions used as `Hotkey.<Action>` keys: `ToggleActive`, `ToggleMode`, `SmartLock`, `LockX`, `LockY`, `LockZ`, `LockD`, `SetOrigin`, `RotateTop`, `RotateFront`, `RotateSide`, `RotateByView`, `RotateCycle`, `RotateAboutX`, `RotateAboutY`, `RotateAboutZ`, `ToggleSegmentMode`, `ClearLocks`, `CancelEntry`, `CancelCommand`, `FinishLine`, `ConfirmPoint`.
+
+In a value, a comma separates **alternative** bindings and a space joins the two keys of a **chord**: `"16777220,16777221"` is Return plus numpad Enter, `"82 88"` is the chord `R X`. A key may be either a single binding or the first key of a chord, never both — otherwise pressing the prefix could not be resolved without a timeout.
 
 ```python
 import AxisFlow as AF
@@ -261,6 +267,11 @@ The workbench menu / toolbar exposes:
 
 * **Activate AxisFlow** (`AxisFlow_Activate`) — toggle the standalone compass tool on the active 3-D view.
 * **Draw line** (`AxisFlow_DrawLine`) — draw a polyline through AxisFlow's `getPoint()` API (Escape starts a new line, backtick ends the command). The geometry lives in the demo consumer, `axisflow_demo.py`. Press **M** to make the next segment an arc: click its endpoint, then a point along the arc. Arcs are not forced to be tangent, so segments may meet at any angle, and they are not restricted to a plane. The line can be snapped to itself while you draw it: its confirmed part is published as a temporary object, so endpoints, midpoints and perpendiculars of the segments you have already placed are ordinary snap targets.
+* **Move** (`AxisFlow_Move`) — move the selected objects: pick a base point, then a target. Because the compass anchors on the base point, the second point is usually *typed* as a displacement (`X`, `150`, Enter). With nothing selected, the first click picks the object under the cursor **and** serves as the base point.
+* **Copy** (`AxisFlow_Copy`) — the same, leaving the originals in place.
+
+  With nothing selected, all three transform commands open in **pick mode**: the compass steps aside — there is nothing to aim yet — and the cursor becomes an arrow with a target tail. Click an object and the compass returns; from there it is ordinary AxisFlow input. For Move and Copy that click is still the base point too. The coordinate panel stays up throughout, and a compass pinned on screen with `AlwaysShowCompass` stays visible during the pick.
+* **Extrude** (`AxisFlow_Extrude`) — sweep a planar wire into a surface. Pick the wire and the compass stands up along its normal, so the compass **X axis is the sweep**: the height is typed (`X`, `150`, Enter) rather than hunted for with the mouse. The surface grows live while you drag. Letting the cursor wander off the axis gives an *oblique* extrusion, which is allowed on purpose — press `X` or SmartLock when you want it square. Pick the wire anywhere along its length and the compass anchors there, not at whichever end is vertex zero. Escape cancels. The result is a parametric `Part::Extrusion` with `Solid = False`, so the height stays editable in the property view afterwards. Geometry lives in `axisflow_extrude.py`.
 * **Settings** (`AxisFlow_Settings`) — open the live settings dialog described above.
 
 `AxisFlow_ToggleLiveLine` (show / hide the live guide line) is still registered but no longer sits on the palette — the live line is a checkbox in the settings dialog. Add it to a custom toolbar, or call it from a macro, if you want it back as a button.
@@ -348,8 +359,16 @@ AF.isActive()                     # -> bool
 AF.activate() / AF.deactivate()
 AF.beginSession() / AF.endSession()   # raise / tear down compass + panel
 
-AF.setPlane(u, v, normal)         # orient the compass (App.Vector each)
+AF.setPlane(u, v, normal)         # orient the compass (App.Vector each). Normalised but NOT
+                                  # orthogonalised -- pass a known-orthonormal triple
+AF.alignCompassX(direction)       # safer: aim the compass X axis at a direction you computed,
+                                  # v and the normal are derived orthonormal from it
 AF.resetPlane()
+AF.setCompassVisible(False)       # hide the COMPASS ONLY -- panel stays up, service keeps
+                                  # running. Display state, not activation: deactivate()
+                                  # would also hide the panel and be undone by the next
+                                  # getPoint(). Ignored while AlwaysShowCompass is on,
+                                  # and cleared automatically when the session ends
 AF.setMode('rect')                # 'rect' (ortho) | 'polar' (radial)
 AF.getMode()
 
@@ -358,6 +377,17 @@ AF.lockAxis('x')                  # freeze that field at its current value;
 AF.clearLocks()                   # release every locked field (typed values survive)
 AF.setKeyValue(0, 1500.0)         # rect: 0=X 1=Y 2=Z ; polar: 0=dist 1=angle 2=Z
 AF.clearKeyValues()
+AF.setDisplayLock('x')            # show a lock WITHOUT taking one: the Draft adapter mirrors
+                                  # Draft's own constraint mask so the compass reads right
+                                  # while Draft, not AxisFlow, owns the constraint
+AF.setIndexedDistance(1500.0)     # the length the live line snaps back to
+AF.clearIndexedDistance()
+
+AF.setBasePoint(pt)               # move the compass anchor WITHOUT confirming a point
+AF.getCursorPixel()               # -> (x, y), the cursor in viewport pixels
+AF.getCompassInfo()               # -> dict: origin and planeU / planeV / planeN as TUPLES
+                                  # (not Vectors), plus radius, visible, active, mode,
+                                  # hasSession, hasCompass -- what is actually on screen
 
 AF.solve(raw[, last])             # -> Vector, constrain without touching the UI
 AF.updateCursor(raw[, last])      # same, plus move the compass / panel
@@ -365,10 +395,18 @@ AF.confirm(pt)                    # commit a point as the new origin
 AF.getState()                     # -> dict
 
 AF.setConstrainEnabled(bool)      # off only in the Draft adapter
+AF.constrainEnabled()             # -> bool
 AF.setHotkey(0x58, 'lockx')       # persist a binding; add False to keep it session-scoped
+AF.setHotkeys({'lockx': '88'})    # several at once
 AF.loadHotkeysFromSettings()
+AF.loadHotkeyDefaults(path)       # read the default layout from an INI (hotkeys.ini) and
+                                  # re-apply built-in -> file -> user, in that order
+AF.resetHotkeys()                 # forget the user's overrides and fall back to the
+                                  # defaults (built-in plus hotkeys.ini); other settings
+                                  # untouched
 
 AF.getSettings()                  # -> dict, including the 'hotkeys' map
+AF.getDefaultSettings()           # -> dict, the built-in values
 AF.setSetting('compassSize', 160)
 AF.resetSettings()
 ```

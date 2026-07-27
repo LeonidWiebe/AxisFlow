@@ -129,6 +129,101 @@ class TestAxisFlowApi(unittest.TestCase):
         self.assertAlmostEqual(p.y, 4)
         self.assertAlmostEqual(p.z, 9)
 
+    def test_align_compass_x_aims_at_a_direction(self):
+        """alignCompassX is what the extrude tool stands the compass up with.
+
+        setPlane needs a ready-made orthonormal triple; this one takes a single
+        direction (a wire's normal, in practice) and derives the rest.
+        """
+        AF.alignCompassX(_v(0, 0, 5))                 # length must not matter
+        u = AF.getCompassInfo()['planeU']
+        self.assertAlmostEqual(u[0], 0.0)
+        self.assertAlmostEqual(u[1], 0.0)
+        self.assertAlmostEqual(u[2], 1.0)
+        AF.resetPlane()
+
+    def test_align_compass_x_makes_the_drag_read_as_x(self):
+        """What the extrude tool actually depends on: with the compass aimed
+        along the sweep, freezing the other two fields leaves the cursor's
+        distance along that direction as the X field -- so the height can be
+        typed instead of dragged."""
+        AF.confirm(_v(0, 0, 0))
+        AF.alignCompassX(_v(0, 0, 1))
+        AF.setKeyValue(1, 0.0)                        # freeze v
+        AF.setKeyValue(2, 0.0)                        # freeze the normal
+        p = AF.solve(_v(7, 9, 40))                    # cursor wanders off axis
+        # Only the component along u survives, and it is the world Z here.
+        self.assertAlmostEqual(p.x, 0.0)
+        self.assertAlmostEqual(p.y, 0.0)
+        self.assertAlmostEqual(p.z, 40.0)
+        AF.clearKeyValues()
+        AF.resetPlane()
+
+    def test_align_compass_x_builds_an_orthonormal_frame(self):
+        """A skewed frame would be silently wrong: the solver inverts the
+        compass matrix by transposing it, which only holds when it is
+        orthonormal. Checked at the binding as well as in Tier 1."""
+        def dot(a, b):
+            return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+        AF.alignCompassX(_v(1, 2, 3))
+        info = AF.getCompassInfo()
+        u, v, n = info['planeU'], info['planeV'], info['planeN']
+        for axis in (u, v, n):
+            self.assertAlmostEqual(dot(axis, axis), 1.0, places=6)
+        self.assertAlmostEqual(dot(u, v), 0.0, places=6)
+        self.assertAlmostEqual(dot(u, n), 0.0, places=6)
+        self.assertAlmostEqual(dot(v, n), 0.0, places=6)
+        AF.resetPlane()
+
+    def test_align_compass_x_survives_a_direction_along_world_z(self):
+        """The degenerate case the helper exists for: 'up' defaults to world Z,
+        so a direction parallel to it would collapse the cross product. That is
+        not exotic -- it is the normal of any wire drawn on the XY plane."""
+        def dot(a, b):
+            return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+        AF.alignCompassX(_v(0, 0, 1))
+        info = AF.getCompassInfo()
+        u, v, n = info['planeU'], info['planeV'], info['planeN']
+        self.assertAlmostEqual(dot(v, v), 1.0, places=6)
+        self.assertAlmostEqual(dot(n, n), 1.0, places=6)
+        self.assertAlmostEqual(dot(u, v), 0.0, places=6)
+        self.assertAlmostEqual(dot(u, n), 0.0, places=6)
+        AF.resetPlane()
+
+    def test_align_compass_x_ignores_a_zero_direction(self):
+        """A degenerate wire must not wipe the compass orientation."""
+        AF.setPlane(_v(0, 1, 0), _v(-1, 0, 0), _v(0, 0, 1))
+        before = AF.getCompassInfo()['planeU']
+        AF.alignCompassX(_v(0, 0, 0))
+        after = AF.getCompassInfo()['planeU']
+        for i in range(3):
+            self.assertAlmostEqual(before[i], after[i])
+        AF.resetPlane()
+
+    def test_set_compass_visible_is_display_state_only(self):
+        """Hiding the compass must not touch the service.
+
+        The distinction is the whole reason the call exists: deactivate() also
+        hides the panel and, because AxisFlowTool::activate() activates the
+        service itself, was undone by the next getPoint().
+        """
+        self.assertTrue(AF.isActive())
+        AF.setCompassVisible(False)
+        self.assertTrue(AF.isActive(), "hiding the compass deactivated AxisFlow")
+        p = AF.solve(_v(5, 0, 0))
+        self.assertAlmostEqual(p.x, 5.0)      # still solving
+        AF.setCompassVisible(True)
+        self.assertTrue(AF.isActive())
+
+    def test_set_compass_visible_survives_a_double_call(self):
+        for _ in range(2):
+            AF.setCompassVisible(False)
+        for _ in range(2):
+            AF.setCompassVisible(True)
+        self.assertTrue(AF.isActive())
+
     # -- hotkeys / settings ------------------------------------------------
     # Qt key codes are stable ABI constants; use them directly to avoid the
     # PySide6 scoped-enum question (Qt.Key_F7 vs Qt.Key.Key_F7).
@@ -269,6 +364,53 @@ class TestAxisFlowApi(unittest.TestCase):
             for key, value in before.items():
                 if key != 'hotkeys':
                     AF.setSetting(key, value)
+
+    def test_readme_settings_table_matches_the_defaults(self):
+        """The Settings table in README.md is the user-facing contract, and it
+        drifted twice before this test existed: three CompassPath* options were
+        never documented, and a whole column of defaults in the handoff notes
+        went stale after the compass was retuned. Parse the table and compare it
+        against the code so a changed default or a new option cannot ship with
+        the docs quietly disagreeing.
+
+        Skipped when README.md is not next to this file: the installed module
+        ships without it, and a missing doc must not fail an install-tree run.
+        """
+        import os
+        import re
+
+        readme = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'README.md')
+        if not os.path.isfile(readme):
+            self.skipTest('README.md not present (installed tree)')
+
+        with open(readme, encoding='utf-8') as handle:
+            text = handle.read()
+
+        # Rows look like:  | `Key` | `camelName` | Type | default | meaning |
+        row = re.compile(
+            r'^\|\s*`(\w+)`\s*\|\s*`(\w+)`\s*\|\s*(\w+)\s*\|\s*`?([^`|]+?)`?\s*\|',
+            re.MULTILINE)
+        documented = {m.group(2): (m.group(3), m.group(4).strip())
+                      for m in row.finditer(text)}
+        self.assertTrue(documented, 'no settings rows parsed out of README.md')
+
+        defaults = AF.getDefaultSettings()
+        self.assertEqual(set(documented), set(defaults),
+                         'README settings table and getDefaultSettings() differ')
+
+        for name, (kind, written) in documented.items():
+            actual = defaults[name]
+            if kind == 'Bool':
+                self.assertEqual(written.lower(), str(bool(actual)).lower(), name)
+            elif kind == 'Unsigned':
+                self.assertEqual(int(written, 16), int(actual), name)
+            elif kind == 'Float':
+                self.assertAlmostEqual(float(written), float(actual), places=3,
+                                       msg=name)
+            elif kind == 'Int':
+                self.assertEqual(int(written), int(actual), name)
+            else:
+                self.fail('unknown type column {0!r} for {1}'.format(kind, name))
 
     def test_set_base_point_moves_the_origin(self):
         """setBasePoint moves the compass anchor without confirming a point."""

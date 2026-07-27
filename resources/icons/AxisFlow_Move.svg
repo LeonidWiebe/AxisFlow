@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Move: a shape leaves its old place (ghost) and travels along a
+       compass axis to the new one. Same palette as the other AxisFlow icons:
+       blue geometry, red X / green Y axis hints, dark base point. -->
+
+  <!-- ghost: where the object was -->
+  <rect x="9" y="34" width="19" height="15" rx="1.6" fill="none"
+        stroke="#9AA7B2" stroke-width="2.2" stroke-dasharray="3.4 3"/>
+
+  <!-- the object in its new place -->
+  <rect x="36" y="13" width="19" height="15" rx="1.6" fill="none"
+        stroke="#2C82C9" stroke-width="3.2"/>
+
+  <!-- displacement -->
+  <line x1="21" y1="36" x2="40" y2="24" stroke="#2C3E50" stroke-width="2.6"
+        stroke-linecap="round"/>
+  <polygon points="45,21 36,22.5 39.6,27.4" fill="#2C3E50"/>
+
+  <!-- base point with its axis hints -->
+  <line x1="14" y1="49" x2="27" y2="49" stroke="#D0322B" stroke-width="2.2"
+        stroke-linecap="round"/>
+  <line x1="14" y1="49" x2="14" y2="36" stroke="#2E9E3F" stroke-width="2.2"
+        stroke-linecap="round"/>
+  <rect x="10" y="45" width="8" height="8" rx="1.4" fill="#2C3E50"/>
+</svg>

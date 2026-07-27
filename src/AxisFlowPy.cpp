@@ -176,6 +176,33 @@ PyObject* axisflow_confirm(PyObject*, PyObject* args)
     }
 }
 
+PyObject* axisflow_setCompassVisible(PyObject*, PyObject* args)
+{
+    PyObject* o = nullptr;
+    if (!PyArg_ParseTuple(args, "O", &o))
+        return nullptr;
+    // Note the inversion: the Python API is phrased as "visible", the service
+    // stores "hidden". Callers think in terms of showing something; the service
+    // needs a flag that defaults to off so nothing has to opt in.
+    AxisFlowService::instance().setCompassHidden(PyObject_IsTrue(o) != 1);
+    Py_RETURN_NONE;
+}
+
+PyObject* axisflow_alignCompassX(PyObject*, PyObject* args)
+{
+    PyObject* dO = nullptr;
+    if (!PyArg_ParseTuple(args, "O", &dO))
+        return nullptr;
+    try {
+        Base::Vector3d d = Py::Vector(Py::Object(dO)).toVector();
+        AxisFlowService::instance().alignCompassX(d);
+        Py_RETURN_NONE;
+    }
+    catch (Py::Exception&) {
+        return nullptr;
+    }
+}
+
 PyObject* axisflow_setPlane(PyObject*, PyObject* args)
 {
     PyObject *uO = nullptr, *vO = nullptr, *nO = nullptr;
@@ -404,6 +431,21 @@ static bool ensureOwnSession()
     return true;
 }
 
+PyObject* axisflow_getCursorPixel(PyObject*, PyObject*)
+{
+    // Screen position of the cursor in the session's view, or None before the
+    // first mouse move. Picking an OBJECT is a screen-space query -- the world
+    // point AxisFlow hands to a consumer cannot answer "what is under the
+    // cursor", so a transform tool that selects by clicking needs this to call
+    // View.getObjectInfo().
+    if (!g_session)
+        Py_RETURN_NONE;
+    const SbVec2s p = g_session->lastPixel();
+    if (p[0] < 0 || p[1] < 0)
+        Py_RETURN_NONE;
+    return Py_BuildValue("(ii)", int(p[0]), int(p[1]));
+}
+
 PyObject* axisflow_setBasePoint(PyObject*, PyObject* args)
 {
     // Move the compass anchor WITHOUT confirming a point: no pointConfirmed
@@ -619,6 +661,7 @@ PyObject* axisflow_getSettings(PyObject*, PyObject*)
     setItem("activeFieldColor", PyLong_FromUnsignedLong(s.activeFieldColor()));
     setItem("fillTransparency", PyFloat_FromDouble(s.fillTransparency()));
     setItem("alwaysShowCompass", PyBool_FromLong(s.alwaysShowCompass() ? 1 : 0));
+    setItem("compassAnimation",  PyBool_FromLong(s.compassAnimation() ? 1 : 0));
     setItem("liveLineEnabled",  PyBool_FromLong(s.liveLineEnabled() ? 1 : 0));
     setItem("liveLineStyle",    PyLong_FromLong(s.liveLineStyle()));
     setItem("liveLineColor",    PyLong_FromUnsignedLong(s.liveLineColor()));
@@ -683,6 +726,7 @@ PyObject* axisflow_getDefaultSettings(PyObject*, PyObject*)
     setItem("activeFieldColor", PyLong_FromUnsignedLong(D::activeFieldColor));
     setItem("fillTransparency", PyFloat_FromDouble(D::fillTransparency));
     setItem("alwaysShowCompass", PyBool_FromLong(D::alwaysShowCompass ? 1 : 0));
+    setItem("compassAnimation",  PyBool_FromLong(D::compassAnimation ? 1 : 0));
 
     setItem("liveLineEnabled",  PyBool_FromLong(D::liveLineEnabled ? 1 : 0));
     setItem("liveLineStyle",    PyLong_FromLong(D::liveLineStyle));
@@ -726,6 +770,7 @@ PyObject* axisflow_setSetting(PyObject*, PyObject* args)
     else if (k == "activeFieldColor")  s.setActiveFieldColor(PyLong_AsUnsignedLong(val));
     else if (k == "fillTransparency")  s.setFillTransparency(PyFloat_AsDouble(val));
     else if (k == "alwaysShowCompass") s.setAlwaysShowCompass(PyObject_IsTrue(val) == 1);
+    else if (k == "compassAnimation")  s.setCompassAnimation(PyObject_IsTrue(val) == 1);
     else if (k == "liveLineEnabled")   s.setLiveLineEnabled(PyObject_IsTrue(val) == 1);
     else if (k == "liveLineStyle")     s.setLiveLineStyle(static_cast<int>(PyLong_AsLong(val)));
     else if (k == "compassPathEnabled") s.setCompassPathEnabled(PyObject_IsTrue(val) != 0);
@@ -853,10 +898,26 @@ PyMethodDef AxisFlowMethods[] = {
      "|'clearlocks'|'cancelentry'|'cancelcommand'|'finishline'|'confirmpoint'|'none'[, persist=True])."},
     {"confirm",        axisflow_confirm,        METH_VARARGS,
      "confirm(point). Commit a point as the new compass origin."},
+    {"getCursorPixel", axisflow_getCursorPixel, METH_NOARGS,
+     "getCursorPixel() -> (x, y) | None -- last cursor position in view pixels,\n"
+     "  for View.getObjectInfo() when a tool selects by clicking."},
     {"setBasePoint",   axisflow_setBasePoint,   METH_VARARGS,
      "setBasePoint(vector) -- move the compass anchor without confirming a point."},
     {"setPlane",       axisflow_setPlane,       METH_VARARGS,
-     "setPlane(u, v, normal). Set compass/working-plane orientation."},
+     "setPlane(u, v, normal). Set compass/working-plane orientation.\n"
+     "The vectors are normalised but NOT orthogonalised -- pass an orthonormal\n"
+     "triple (a working plane's axes) or use alignCompassX() instead."},
+    {"setCompassVisible", axisflow_setCompassVisible, METH_VARARGS,
+     "setCompassVisible(bool). Hide or show the COMPASS ONLY -- the coordinate\n"
+     "panel stays up and the service keeps running. Display state, not\n"
+     "activation: deactivate() would also hide the panel and would be undone by\n"
+     "the next getPoint(), which activates the service itself. Used by the\n"
+     "transform tools while they wait for an object to be picked. Ignored while\n"
+     "AlwaysShowCompass is on, and reset automatically when the session ends."},
+    {"alignCompassX",  axisflow_alignCompassX,  METH_VARARGS,
+     "alignCompassX(dir). Point the compass X axis along dir; v and the normal\n"
+     "are derived orthonormal from it. The safe way to aim the compass at a\n"
+     "direction you computed yourself (e.g. a wire's normal)."},
     {"resetPlane",     axisflow_resetPlane,     METH_NOARGS,
      "resetPlane(). Reset compass orientation to world axes."},
     {"setMode",        axisflow_setMode,        METH_VARARGS,
@@ -888,7 +949,7 @@ PyMethodDef AxisFlowMethods[] = {
     {"setSetting",     axisflow_setSetting,     METH_VARARGS,
      "setSetting(name, value). name in {compassSize, axisThickness, axisStartPct, "
      "axisLengthPct, axisColorX, axisColorY, activeFieldColor, fillTransparency, "
-     "alwaysShowCompass, liveLineEnabled, liveLineStyle, liveLineColor, "
+     "alwaysShowCompass, compassAnimation, liveLineEnabled, liveLineStyle, liveLineColor, "
      "compassPathEnabled, compassPathStyle, compassPathColor, "
      "liveLineTransparency, useDistanceIndexing, useAxesIndexing, indexingTolerance, "
      "indexingAxisWeight, indexingAxisTransparency}."},

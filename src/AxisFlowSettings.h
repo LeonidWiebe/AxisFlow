@@ -49,6 +49,7 @@ struct AxisFlowDefaults {
     static constexpr bool   smartNegativeDirection = true;
     static constexpr bool   focusAdvanceOnMove = true;
     static constexpr int    compassFollowDirection = 0;
+    static constexpr bool   compassAnimation = true;
     static constexpr double compassRotateAnimation = 0.5;
 };
 
@@ -190,6 +191,8 @@ public:
 
     /** Compass rotation animation, in seconds (0 = instant). Display only:
      *  the solver switches planes immediately, the compass eases after it. */
+    bool   compassAnimation() const { return _compassAnimation; }
+    void   setCompassAnimation(bool v);
     double compassRotateAnimation() const { return _rotateAnimS; }
     void   setCompassRotateAnimation(double v);
 
@@ -231,6 +234,7 @@ private:
     unsigned long _activeFieldColor  { 0xDCDCDCFFul };   // slightly darker field
     double        _fillTransparency  { 0.65 };
     bool          _alwaysShowCompass { false };
+    bool          _compassAnimation  { true };
     bool          _liveLineEnabled   { false };
     int           _liveLineStyle     { 0 };            // solid
     bool          _compassPathEnabled { true };

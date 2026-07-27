@@ -13,7 +13,7 @@ setlocal EnableExtensions
 cd /d "%~dp0"
 
 REM keep in sync with package.xml / make_release.bat
-set "VERSION=0.2.0"
+set "VERSION=0.2.1"
 if not defined CONFIG set "CONFIG=RelWithDebInfo"
 
 REM 1) build + stage runtime files

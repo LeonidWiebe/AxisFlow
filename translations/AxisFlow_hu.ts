@@ -149,241 +149,250 @@
     </message>
     <message>
         <location filename="../axisflow_settings.py" line="194"/>
+        <source>Animate the compass</source>
+        <translation>Iránytű animálása</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_settings.py" line="195"/>
         <source>Compass size (px)</source>
         <translation>Iránytű mérete (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="195"/>
+        <location filename="../axisflow_settings.py" line="196"/>
         <source>Axis thickness (px)</source>
         <translation>Tengelyvastagság (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="196"/>
+        <location filename="../axisflow_settings.py" line="197"/>
         <source>Axis start (fraction)</source>
         <translation>Tengely kezdete (arány)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="197"/>
+        <location filename="../axisflow_settings.py" line="198"/>
         <source>Axis length (fraction)</source>
         <translation>Tengely hossza (arány)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="198"/>
+        <location filename="../axisflow_settings.py" line="199"/>
         <source>Fill transparency</source>
         <translation>Kitöltés átlátszósága</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="199"/>
+        <location filename="../axisflow_settings.py" line="200"/>
         <source>X axis colour</source>
         <translation>X tengely színe</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="200"/>
+        <location filename="../axisflow_settings.py" line="201"/>
         <source>Y axis colour</source>
         <translation>Y tengely színe</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="201"/>
+        <location filename="../axisflow_settings.py" line="202"/>
         <source>Active field colour</source>
         <translation>Aktív mező színe</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="203"/>
+        <location filename="../axisflow_settings.py" line="204"/>
         <source>Live Line</source>
         <translation>Élő vonal</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="204"/>
+        <location filename="../axisflow_settings.py" line="205"/>
         <source>Live line</source>
         <translation>Élő vonal</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="205"/>
+        <location filename="../axisflow_settings.py" line="206"/>
         <source>Live line style</source>
         <translation>Élő vonal stílusa</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="206"/>
-        <location filename="../axisflow_settings.py" line="212"/>
+        <location filename="../axisflow_settings.py" line="207"/>
+        <location filename="../axisflow_settings.py" line="213"/>
         <source>Solid</source>
         <translation>Folytonos</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="206"/>
-        <location filename="../axisflow_settings.py" line="212"/>
+        <location filename="../axisflow_settings.py" line="207"/>
+        <location filename="../axisflow_settings.py" line="213"/>
         <source>Dashed</source>
         <translation>Szaggatott</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="207"/>
-        <location filename="../axisflow_settings.py" line="213"/>
+        <location filename="../axisflow_settings.py" line="208"/>
+        <location filename="../axisflow_settings.py" line="214"/>
         <source>Dotted</source>
         <translation>Pontozott</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="207"/>
-        <location filename="../axisflow_settings.py" line="213"/>
+        <location filename="../axisflow_settings.py" line="208"/>
+        <location filename="../axisflow_settings.py" line="214"/>
         <source>Dash-dot</source>
         <translation>Vonal-pont</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="208"/>
+        <location filename="../axisflow_settings.py" line="209"/>
         <source>Live line colour</source>
         <translation>Élő vonal színe</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="209"/>
+        <location filename="../axisflow_settings.py" line="210"/>
         <source>Live line transparency</source>
         <translation>Élő vonal átlátszósága</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="210"/>
+        <location filename="../axisflow_settings.py" line="211"/>
         <source>Draw path to the point</source>
         <translation>Útvonal rajzolása a pontig</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="211"/>
+        <location filename="../axisflow_settings.py" line="212"/>
         <source>Path style</source>
         <translation>Útvonal stílusa</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="214"/>
+        <location filename="../axisflow_settings.py" line="215"/>
         <source>Path colour</source>
         <translation>Útvonal színe</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="215"/>
+        <location filename="../axisflow_settings.py" line="216"/>
         <source>Use distance indexing</source>
         <translation>Távolság szerinti indexelés</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="216"/>
+        <location filename="../axisflow_settings.py" line="217"/>
         <source>Use axes indexing</source>
         <translation>Tengelyek szerinti indexelés</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="217"/>
+        <location filename="../axisflow_settings.py" line="218"/>
         <source>Indexing tolerance (px)</source>
         <translation>Indexelési tűrés (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="218"/>
+        <location filename="../axisflow_settings.py" line="219"/>
         <source>Indexing axis weight (px)</source>
         <translation>Indexelési tengely vastagsága (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="219"/>
+        <location filename="../axisflow_settings.py" line="220"/>
         <source>Indexing axis transparency</source>
         <translation>Indexelési tengely átlátszósága</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="221"/>
+        <location filename="../axisflow_settings.py" line="222"/>
         <source>Behaviour</source>
         <translation>Viselkedés</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="222"/>
+        <location filename="../axisflow_settings.py" line="223"/>
         <source>Use object snapping</source>
         <translation>Objektumillesztés használata</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="223"/>
+        <location filename="../axisflow_settings.py" line="224"/>
         <source>Smart negative direction</source>
         <translation>Intelligens negatív irány</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="224"/>
+        <location filename="../axisflow_settings.py" line="225"/>
         <source>Focus advance on movement</source>
         <translation>Fókuszléptetés mozgásra</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="225"/>
+        <location filename="../axisflow_settings.py" line="226"/>
         <source>Compass follows direction</source>
         <translation>Az iránytű követi az irányt</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="226"/>
+        <location filename="../axisflow_settings.py" line="227"/>
         <source>Off</source>
         <translation>Ki</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="226"/>
+        <location filename="../axisflow_settings.py" line="227"/>
         <source>On (keep Z)</source>
         <translation>Be (Z megtartása)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="227"/>
+        <location filename="../axisflow_settings.py" line="228"/>
         <source>On (full)</source>
         <translation>Be (teljes)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="228"/>
-        <source>Compass rotation animation (s)</source>
-        <translation>Iránytű forgatási animáció (s)</translation>
+        <location filename="../axisflow_settings.py" line="229"/>
+        <source>Compass animation (s)</source>
+        <translation>Iránytű animáció (s)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="268"/>
+        <source>Compass rotation animation (s)</source>
+        <translation type="vanished">Iránytű forgatási animáció (s)</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_settings.py" line="269"/>
         <source>Pick colour</source>
         <translation>Szín kiválasztása</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="280"/>
+        <location filename="../axisflow_settings.py" line="281"/>
         <source>AxisFlow settings</source>
         <translation>AxisFlow beállítások</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="313"/>
+        <location filename="../axisflow_settings.py" line="314"/>
         <source>Restore defaults</source>
         <translation>Alapértelmezések visszaállítása</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="315"/>
+        <location filename="../axisflow_settings.py" line="316"/>
         <source>Restores the default values of this section only</source>
         <translation>Csak ennek a szakasznak az alapértelmezett értékeit állítja vissza</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="328"/>
+        <location filename="../axisflow_settings.py" line="329"/>
         <source>Control hotkeys</source>
         <translation>Vezérlőbillentyűk</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="330"/>
+        <location filename="../axisflow_settings.py" line="331"/>
         <source>View hotkeys</source>
         <translation>Nézetbillentyűk</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="346"/>
+        <location filename="../axisflow_settings.py" line="347"/>
         <source>Close</source>
         <translation>Bezárás</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="361"/>
+        <location filename="../axisflow_settings.py" line="362"/>
         <source>Click a key field, then press the key you want. Assigning replaces that action&apos;s current key(s). Keys work while AxisFlow is running.</source>
         <translation>Kattintson egy billentyűmezőre, majd nyomja meg a kívánt billentyűt. A hozzárendelés lecseréli a művelet eddigi billentyűit. A billentyűk az AxisFlow futása közben működnek.</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="382"/>
+        <location filename="../axisflow_settings.py" line="383"/>
         <source>Unassign</source>
         <translation>Hozzárendelés törlése</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="390"/>
+        <location filename="../axisflow_settings.py" line="391"/>
         <source>Restore default keys</source>
         <translation>Alapértelmezett billentyűk visszaállítása</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="391"/>
+        <location filename="../axisflow_settings.py" line="392"/>
         <source>Resets the keys of BOTH hotkey pages</source>
         <translation>MINDKÉT oldal billentyűit visszaállítja</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="445"/>
-        <location filename="../axisflow_settings.py" line="483"/>
+        <location filename="../axisflow_settings.py" line="446"/>
+        <location filename="../axisflow_settings.py" line="484"/>
         <source>Key cannot be used</source>
         <translation>A billentyű nem használható</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="446"/>
+        <location filename="../axisflow_settings.py" line="447"/>
         <source>{key} is already the {kind} used by &quot;{action}&quot;.
 
 A key is either a binding of its own or the first key of a two-key chord, never both.</source>
@@ -392,28 +401,68 @@ A key is either a binding of its own or the first key of a two-key chord, never 
 Egy billentyű vagy önálló hozzárendelés, vagy egy két billentyűs kombináció első billentyűje, de sosem mindkettő.</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="451"/>
+        <location filename="../axisflow_settings.py" line="452"/>
         <source>start of a chord</source>
         <translation>kombináció kezdete</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="452"/>
+        <location filename="../axisflow_settings.py" line="453"/>
         <source>single key</source>
         <translation>önálló billentyű</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="467"/>
+        <location filename="../axisflow_settings.py" line="468"/>
         <source>Key already used</source>
         <translation>A billentyű már foglalt</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="468"/>
+        <location filename="../axisflow_settings.py" line="469"/>
         <source>{key} is currently assigned to &quot;{action}&quot;.
 
 Reassign it? That action will be left without a key.</source>
         <translation>A(z) {key} jelenleg a következőhöz tartozik: „{action}”.
 
 Átrendeli? Az a művelet billentyű nélkül marad.</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="211"/>
+        <source>Pick base point</source>
+        <translation>Válassza ki a bázispontot</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="212"/>
+        <source>Pick target point</source>
+        <translation>Válassza ki a célpontot</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="238"/>
+        <source>No active document</source>
+        <translation>Nincs aktív dokumentum</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="247"/>
+        <source>Click an object to transform (that click is also the base point)</source>
+        <translation>Kattintson egy objektumra (ez a kattintás egyben a bázispont is)</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="341"/>
+        <source>Nothing under the cursor -- click an object</source>
+        <translation>Nincs semmi a kurzor alatt – kattintson egy objektumra</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_extrude.py" line="379"/>
+        <source>Drag or type the extrusion height</source>
+        <translation>Húzza vagy írja be a kihúzás magasságát</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_extrude.py" line="406"/>
+        <source>AxisFlow extrude: the wire is not planar -- there is no plane to be perpendicular to</source>
+        <translation>AxisFlow kihúzás: a huzal nem síkbeli — nincs sík, amire merőleges lehetne</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_extrude.py" line="416"/>
+        <source>AxisFlow extrude: sweeping all selected wires along the first one&apos;s normal</source>
+        <translation>AxisFlow kihúzás: minden kijelölt huzal az első normálisa mentén lesz kihúzva</translation>
     </message>
 </context>
 <context>
@@ -458,27 +507,66 @@ Reassign it? That action will be left without a key.</source>
     </message>
 </context>
 <context>
+    <name>CmdAxisFlowCopy</name>
+    <message>
+        <location filename="../src/Command.cpp" line="155"/>
+        <source>Copy</source>
+        <translation>Másolás</translation>
+    </message>
+    <message>
+        <location filename="../src/Command.cpp" line="156"/>
+        <source>Copy the selected objects to another point with the AxisFlow compass; the originals stay where they are</source>
+        <translation>A kijelölt objektumok másolása másik pontba az AxisFlow iránytűvel; az eredetiek a helyükön maradnak</translation>
+    </message>
+</context>
+<context>
     <name>CmdAxisFlowDrawLine</name>
     <message>
-        <location filename="../src/Command.cpp" line="157"/>
+        <location filename="../src/Command.cpp" line="257"/>
         <source>Draw line</source>
         <translation>Vonal rajzolása</translation>
     </message>
     <message>
-        <location filename="../src/Command.cpp" line="158"/>
+        <location filename="../src/Command.cpp" line="258"/>
         <source>Draw a polyline using the AxisFlow compass (Escape starts a new line, backtick ends the command)</source>
         <translation>Töröttvonal rajzolása az AxisFlow iránytűvel (az Escape új vonalat kezd, a visszaidéző jel befejezi a parancsot)</translation>
     </message>
 </context>
 <context>
+    <name>CmdAxisFlowExtrude</name>
+    <message>
+        <location filename="../src/Command.cpp" line="186"/>
+        <source>Extrude</source>
+        <translation>Kihúzás</translation>
+    </message>
+    <message>
+        <location filename="../src/Command.cpp" line="187"/>
+        <source>Sweep a planar wire into a surface. The compass stands up along the wire&apos;s normal, so the height can be typed instead of dragged. A non-planar wire cannot be picked</source>
+        <translation>Síkbeli huzal kihúzása felületté. Az iránytű a huzal normálisa mentén áll fel, így a magasság beírható ahelyett, hogy húzni kellene. Nem síkbeli huzal nem jelölhető ki</translation>
+    </message>
+</context>
+<context>
+    <name>CmdAxisFlowMove</name>
+    <message>
+        <location filename="../src/Command.cpp" line="123"/>
+        <source>Move</source>
+        <translation>Mozgatás</translation>
+    </message>
+    <message>
+        <location filename="../src/Command.cpp" line="124"/>
+        <source>Move the selected objects with the AxisFlow compass. With nothing selected, the first click picks the object and doubles as the base point</source>
+        <translation>A kijelölt objektumok mozgatása az AxisFlow iránytűvel. Ha nincs kijelölés, az első kattintás választja ki az objektumot, és egyben a bázispont is</translation>
+    </message>
+</context>
+<context>
     <name>CmdAxisFlowSettings</name>
     <message>
-        <location filename="../src/Command.cpp" line="195"/>
+        <location filename="../src/Command.cpp" line="295"/>
         <source>Settings</source>
         <translation>Beállítások</translation>
     </message>
     <message>
-        <location filename="../src/Command.cpp" line="196"/>
+        <location filename="../src/Command.cpp" line="296"/>
         <source>Open the AxisFlow settings (changes apply live)</source>
         <translation>AxisFlow beállítások megnyitása (a változások azonnal érvényesülnek)</translation>
     </message>
@@ -486,12 +574,12 @@ Reassign it? That action will be left without a key.</source>
 <context>
     <name>CmdAxisFlowToggleLiveLine</name>
     <message>
-        <location filename="../src/Command.cpp" line="119"/>
+        <location filename="../src/Command.cpp" line="219"/>
         <source>Toggle live line</source>
         <translation>Élő vonal be-/kikapcsolása</translation>
     </message>
     <message>
-        <location filename="../src/Command.cpp" line="120"/>
+        <location filename="../src/Command.cpp" line="220"/>
         <source>Show or hide the live guide line from the compass centre to the cursor</source>
         <translation>Az iránytű középpontjától a kurzorig tartó vezetővonal megjelenítése vagy elrejtése</translation>
     </message>

@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Copy: the original STAYS (solid, unlike Move's ghost) and a duplicate
+       travels along a compass axis to the new place. -->
+
+  <!-- the original, left in place -->
+  <rect x="9" y="34" width="19" height="15" rx="1.6" fill="none"
+        stroke="#2C82C9" stroke-width="3.2"/>
+
+  <!-- the duplicate -->
+  <rect x="36" y="13" width="19" height="15" rx="1.6" fill="none"
+        stroke="#2C82C9" stroke-width="3.2"/>
+
+  <!-- displacement -->
+  <line x1="21" y1="36" x2="40" y2="24" stroke="#2C3E50" stroke-width="2.6"
+        stroke-linecap="round"/>
+  <polygon points="45,21 36,22.5 39.6,27.4" fill="#2C3E50"/>
+
+  <!-- a small plus marks this as an addition rather than a displacement -->
+  <line x1="47" y1="38" x2="47" y2="50" stroke="#2E9E3F" stroke-width="3"
+        stroke-linecap="round"/>
+  <line x1="41" y1="44" x2="53" y2="44" stroke="#2E9E3F" stroke-width="3"
+        stroke-linecap="round"/>
+
+  <!-- base point -->
+  <rect x="10" y="45" width="8" height="8" rx="1.4" fill="#2C3E50"/>
+  <line x1="14" y1="49" x2="27" y2="49" stroke="#D0322B" stroke-width="2.2"
+        stroke-linecap="round"/>
+</svg>

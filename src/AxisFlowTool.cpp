@@ -82,6 +82,8 @@ void AxisFlowTool::activate(bool withPositionSource)
     connect(&svc, &AxisFlowService::cursorMoved,      this, &AxisFlowTool::onCursorMoved);
     connect(&svc, &AxisFlowService::stateChanged,     this, &AxisFlowTool::onServiceStateChanged);
     connect(&svc, &AxisFlowService::activeChanged,    this, &AxisFlowTool::onActiveChanged);
+    connect(&svc, &AxisFlowService::compassHiddenChanged,
+            this, [this](bool) { updateCompassVisibility(); });
     connect(&svc, &AxisFlowService::cancelRequested,  this, &AxisFlowTool::cancelInput);
     connect(&svc, &AxisFlowService::finishRequested,  this, &AxisFlowTool::onFinishLine);
     connect(&svc, &AxisFlowService::confirmRequested, this, &AxisFlowTool::confirmPoint);
@@ -100,8 +102,20 @@ void AxisFlowTool::activate(bool withPositionSource)
         return;
     }
 
+    // A surviving QPointer only proves the QObject is alive, not that its Coin
+    // side still is: during teardown the view outlives its viewer for a moment.
+    // The camera helpers below already checked this; do it here too rather than
+    // leave one path in the file able to dereference null.
     Gui::View3DInventorViewer* viewer = _view->getViewer();
-    SoSeparator* root = static_cast<SoSeparator*>(viewer->getSceneGraph());
+    SoSeparator* root = viewer ? static_cast<SoSeparator*>(viewer->getSceneGraph())
+                              : nullptr;
+    if (!root) {
+        _active = false;
+        if (s_current == this)
+            s_current = nullptr;
+        Base::Console().warning("AxisFlow: the 3D viewer is gone; not activating.\n");
+        return;
+    }
 
     if (withPositionSource) {
         // Own tool: AxisFlow owns the keyboard and the constraint. A previous
@@ -202,11 +216,17 @@ void AxisFlowTool::deactivate()
     // already gone -- touching them here was the crash. The Coin callback still
     // has to be unref'd: we own that reference regardless of the view.
     if (_view) {
+        // Same reasoning as in activate(): an alive view may already have lost
+        // its viewer, and this is the teardown path, i.e. exactly where that
+        // happens. A null root simply means the graph took our nodes with it.
         Gui::View3DInventorViewer* viewer = _view->getViewer();
-        SoSeparator* root = static_cast<SoSeparator*>(viewer->getSceneGraph());
-        if (_eventCB)
-            root->removeChild(_eventCB);
-        root->removeChild(_compass->getRootNode());
+        SoSeparator* root = viewer ? static_cast<SoSeparator*>(viewer->getSceneGraph())
+                                  : nullptr;
+        if (root) {
+            if (_eventCB)
+                root->removeChild(_eventCB);
+            root->removeChild(_compass->getRootNode());
+        }
     }
     if (_eventCB) {
         _eventCB->unref();
@@ -250,6 +270,7 @@ void AxisFlowTool::handleCoinEventBody(SoEventCallback* node)
     if (event->isOfType(SoLocation2Event::getClassTypeId())) {
         const auto* me = static_cast<const SoLocation2Event*>(event);
         AxisFlowService& svc = AxisFlowService::instance();
+        _lastPixel = me->getPosition();   // consumers pick objects with this
 
         // Push the current pixel scale first, so indexing's pixel tolerances are
         // evaluated against THIS frame's zoom during the solve below.
@@ -272,6 +293,7 @@ void AxisFlowTool::handleCoinEventBody(SoEventCallback* node)
         // decides which axis to ride from where the CURSOR is, not the snap.
         SbVec3f worldPt = unprojectToCompassPlane(me->getPosition());
         Base::Vector3d raw(worldPt[0], worldPt[1], worldPt[2]);
+        raw = snapToCompassPlane(raw);
         svc.updateCursor(raw, nullptr);   // -> cursorMoved
         node->setHandled();
         return;
@@ -362,15 +384,49 @@ void AxisFlowTool::hideSnapMarkers()
     PyErr_Clear();
 }
 
+Base::Vector3d AxisFlowTool::snapToCompassPlane(const Base::Vector3d& p) const
+{
+    // Put the point EXACTLY on the compass plane, in double precision.
+    //
+    // unprojectToCompassPlane() has to work in Coin's world, which is single
+    // precision throughout: SbVec3f, SbLine, SbPlane, and the plane's own
+    // origin and normal are downcast from double on the way in. A float carries
+    // about seven significant digits, so at a coordinate of 1000 mm the
+    // intersection lands roughly 1e-4 mm off the plane -- and the solver passes
+    // that out-of-plane component straight through whenever Z is not locked.
+    //
+    // Nobody sees 1e-4 mm, but OCC does. Every point of a polyline drawn on one
+    // plane picks up its own tiny offset, so the finished wire is not planar in
+    // the exact sense, and Part.Shape.findPlane() -- which defaults to about
+    // 1e-7 -- refuses it. That is what made the extrude command reject lines
+    // that were drawn flat, and it got worse the further from the origin the
+    // model sat.
+    //
+    // The residual after this is the float error of the ray direction projected
+    // ALONG the plane, which is just cursor position noise well below a pixel.
+    const AxisFlowService& svc = AxisFlowService::instance();
+    Base::Vector3d n = svc.planeNormal();
+    const double len = n.Length();
+    if (len < 1e-12)
+        return p;                      // degenerate frame; nothing to snap to
+    n /= len;
+    const Base::Vector3d d = p - svc.origin();
+    return p - n * d.Dot(n);
+}
+
 SbVec3f AxisFlowTool::unprojectToCompassPlane(const SbVec2s& pixel)
 {
     if (!_view) return SbVec3f(0, 0, 0);
     Gui::View3DInventorViewer* viewer = _view->getViewer();
+    if (!viewer) return SbVec3f(0, 0, 0);
 
-    SoCamera* cam = viewer->getSoRenderManager()->getCamera();
+    SoRenderManager* rm = viewer->getSoRenderManager();
+    if (!rm) return SbVec3f(0, 0, 0);
+
+    SoCamera* cam = rm->getCamera();
     if (!cam) return SbVec3f(0, 0, 0);
 
-    SbViewportRegion vp = viewer->getSoRenderManager()->getViewportRegion();
+    SbViewportRegion vp = rm->getViewportRegion();
     SbViewVolume     vv = cam->getViewVolume(vp.getViewportAspectRatio());
 
     SbVec2s vpSize = vp.getViewportSizePixels();
@@ -585,8 +641,14 @@ void AxisFlowTool::updateCompassVisibility()
     if (!_compass) return;
     // "Always show compass" keeps it on screen while the module is loaded, even
     // when AxisFlow is toggled off; otherwise the compass follows the service.
+    //
+    // AlwaysShowCompass also OUTRANKS a transient hide: a user who asked for the
+    // compass at all times gets it during an object pick too. That is a
+    // deliberate call -- the setting is an explicit instruction, the hide is a
+    // convenience.
+    const AxisFlowService& svc = AxisFlowService::instance();
     const bool always = AxisFlowSettings::instance().alwaysShowCompass();
-    _compass->setVisible(AxisFlowService::instance().isActive() || always);
+    _compass->setVisible(always || (svc.isActive() && !svc.compassHidden()));
 }
 
 void AxisFlowTool::cameraChangedCB(void* userData, SoSensor*)

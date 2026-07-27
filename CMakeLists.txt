@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.14)
-project(AxisFlow VERSION 0.2.0 LANGUAGES CXX)
+project(AxisFlow VERSION 0.2.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -232,6 +232,8 @@ install(FILES axisflow_snap.py  DESTINATION "${FREECAD_MOD_DIR}")
 install(FILES axisflow_demo.py  DESTINATION "${FREECAD_MOD_DIR}")
 install(FILES axisflow_settings.py DESTINATION "${FREECAD_MOD_DIR}")
 install(FILES axisflow_snapping.py DESTINATION "${FREECAD_MOD_DIR}")
+install(FILES axisflow_transform.py DESTINATION "${FREECAD_MOD_DIR}")
+install(FILES axisflow_extrude.py   DESTINATION "${FREECAD_MOD_DIR}")
 install(FILES package.xml       DESTINATION "${FREECAD_MOD_DIR}")
 # Editable default hotkey layout, read at start-up by InitGui.py. Deliberately a
 # loose file (NOT in the .qrc): the whole point is changing it without a rebuild.

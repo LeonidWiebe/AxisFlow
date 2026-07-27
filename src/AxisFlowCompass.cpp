@@ -6,6 +6,7 @@
 #include "AxisFlowSolver.h"   // CompassMode
 
 #include <Inventor/nodes/SoAnnotation.h>
+#include <Inventor/nodes/SoGroup.h>
 #include <Inventor/nodes/SoLightModel.h>
 #include <Inventor/nodes/SoSeparator.h>
 #include <Inventor/nodes/SoSwitch.h>
@@ -20,6 +21,8 @@
 #include <Inventor/nodes/SoShapeHints.h>
 #include <Inventor/nodes/SoCallback.h>
 #include <Inventor/actions/SoGLRenderAction.h>
+#include <Inventor/actions/SoSearchAction.h>
+#include <Inventor/SoPath.h>
 #include <Inventor/system/gl.h>
 #include <Inventor/SbMatrix.h>
 #include <Inventor/SbRotation.h>
@@ -40,6 +43,9 @@ constexpr float kPi = 3.14159265358979323846f;
 // The fill colour is deliberately NOT a setting: only its transparency is.
 // A pale blue keeps the compass readable over both light and dark models.
 const SbColor kFillColor   (0.62f, 0.62f, 0.86f);
+// Kept for reference: the dark ring the contour used to be drawn with. The
+// outline now takes kFillColor so it does not read as a border -- put this back
+// in buildContour() to restore the old look.
 const SbColor kOutlineColor(0.25f, 0.25f, 0.30f);
 const SbColor kDotColor    (0.10f, 0.10f, 0.10f);
 const SbColor kGuideColor  (1.00f, 0.90f, 0.20f);
@@ -97,7 +103,35 @@ void AxisFlowCompass::build()
     _root->addChild(_visSwitch);
 
     auto* content = new SoSeparator;
-    _visSwitch->addChild(content);
+
+    // The ghost lives BESIDE the live compass, not under it: it has to stay at
+    // the old anchor while _transform has already jumped to the new one. It is
+    // added first so it renders behind. _visSwitch shows a single child, so
+    // both go under one group beneath it.
+    auto* stage = new SoGroup;
+    _visSwitch->addChild(stage);
+
+    _ghostSwitch = new SoSwitch;
+    _ghostSwitch->whichChild.setValue(SO_SWITCH_NONE);   // off until a move
+    _ghostSep = new SoSeparator;
+    _ghostTransform = new SoTransform;
+    _ghostSep->addChild(_ghostTransform);
+    {
+        // The ghost renders outside `content`, so it does not inherit the light
+        // model and shape hints set there; it needs its own or it would come
+        // out shaded and one-sided while the live copy is neither.
+        auto* glm = new SoLightModel;
+        glm->model.setValue(SoLightModel::BASE_COLOR);
+        _ghostSep->addChild(glm);
+        auto* ghints = new SoShapeHints;
+        ghints->vertexOrdering.setValue(SoShapeHints::COUNTERCLOCKWISE);
+        ghints->shapeType.setValue(SoShapeHints::UNKNOWN_SHAPE_TYPE);
+        _ghostSep->addChild(ghints);
+    }
+    _ghostSwitch->addChild(_ghostSep);
+    stage->addChild(_ghostSwitch);
+
+    stage->addChild(content);
 
     _transform = new SoTransform;
     content->addChild(_transform);
@@ -115,12 +149,22 @@ void AxisFlowCompass::build()
     hints->shapeType.setValue(SoShapeHints::UNKNOWN_SHAPE_TYPE);
     content->addChild(hints);
 
+    // Everything that IS the compass -- contour, centre dot, axes -- goes in one
+    // separator. The move animation deep-copies this node to leave a ghost
+    // behind at the old anchor, and fades the two copies past each other. The
+    // live line, the path and the indexing markers stay OUT of it on purpose:
+    // they are attachments that track the cursor, and a ghost drawing a live
+    // line from a stale anchor to the current cursor would look like a bug.
+    _bodySep = new SoSeparator;
+    content->addChild(_bodySep);
+
     // ---- contour: square (child 0) / circle (child 1) ----
     _contour = new SoSwitch;
     _contour->whichChild.setValue(0);
 
     auto buildContour = [](SoMaterial*& fill, SoCoordinate3*& coordFill, SoFaceSet*& face,
-                           SoCoordinate3*& coordLine, SoLineSet*& line, SoDrawStyle*& style)
+                           SoCoordinate3*& coordLine, SoLineSet*& line, SoDrawStyle*& style,
+                           SoMaterial*& outline)
     {
         auto* sep = new SoSeparator;
 
@@ -132,8 +176,21 @@ void AxisFlowCompass::build()
         sep->addChild(coordFill);
         sep->addChild(face);
 
-        auto* outColor = new SoBaseColor;
-        outColor->rgb.setValue(kOutlineColor);
+        // SoMaterial, not SoBaseColor: the latter has no transparency field and
+        // so cannot take part in the move fade.
+        //
+        // That swap has a sharp edge worth spelling out. SoBaseColor sets ONLY
+        // the diffuse colour, so the outline used to INHERIT the fill's
+        // transparency from the material above it. SoMaterial brings its own
+        // transparency field, defaulting to 0, which reset the outline to fully
+        // opaque and drew a hard dark ring around the compass. So the outline
+        // now carries the fill's colour and, via applySettings(), the fill's
+        // transparency: it reads as part of the compass instead of a border
+        // around it. Restoring the old dark ring is a matter of putting
+        // kOutlineColor back here.
+        outline = new SoMaterial;
+        auto* outColor = outline;
+        outColor->diffuseColor.setValue(kFillColor);
         style = new SoDrawStyle;
         style->lineWidth.setValue(1.5f);
         coordLine = new SoCoordinate3;
@@ -146,14 +203,16 @@ void AxisFlowCompass::build()
         return sep;
     };
 
-    _contour->addChild(buildContour(_fillSq, _coordSq, _faceSq, _outlineSq, _lineSq, _styleSq));
-    _contour->addChild(buildContour(_fillCi, _coordCi, _faceCi, _outlineCi, _lineCi, _styleCi));
-    content->addChild(_contour);
+    _contour->addChild(buildContour(_fillSq, _coordSq, _faceSq, _outlineSq, _lineSq, _styleSq,
+                                    _outlineMatSq));
+    _contour->addChild(buildContour(_fillCi, _coordCi, _faceCi, _outlineCi, _lineCi, _styleCi,
+                                    _outlineMatCi));
+    _bodySep->addChild(_contour);
 
     // ---- centre point ----
     auto* dotSep = new SoSeparator;
-    _dotColor = new SoBaseColor;
-    _dotColor->rgb.setValue(kDotColor);
+    _dotColor = new SoMaterial;
+    _dotColor->diffuseColor.setValue(kDotColor);
     _dotStyle = new SoDrawStyle;
     _dotStyle->pointSize.setValue(6.0f);
     _coordDot = new SoCoordinate3;
@@ -166,14 +225,14 @@ void AxisFlowCompass::build()
     { auto* cb = new SoCallback; cb->setCallback(&beginRoundPoints); dotSep->addChild(cb); }
     dotSep->addChild(_dot);
     { auto* cb = new SoCallback; cb->setCallback(&endRoundPoints);   dotSep->addChild(cb); }
-    content->addChild(dotSep);
+    _bodySep->addChild(dotSep);
 
     // ---- axes: X and Y only (no Z) ----
-    auto buildAxis = [](SoBaseColor*& color, SoDrawStyle*& style,
+    auto buildAxis = [](SoMaterial*& color, SoDrawStyle*& style,
                         SoCoordinate3*& coord, SoLineSet*& line)
     {
         auto* sep = new SoSeparator;
-        color = new SoBaseColor;
+        color = new SoMaterial;
         style = new SoDrawStyle;
         coord = new SoCoordinate3;
         line  = new SoLineSet;
@@ -185,8 +244,8 @@ void AxisFlowCompass::build()
         return sep;
     };
 
-    content->addChild(buildAxis(_colorX, _styleX, _coordX, _lineX));
-    content->addChild(buildAxis(_colorY, _styleY, _coordY, _lineY));
+    _bodySep->addChild(buildAxis(_colorX, _styleX, _coordX, _lineX));
+    _bodySep->addChild(buildAxis(_colorY, _styleY, _coordY, _lineY));
 
     // ---- guide line (live line) ----
     _guideSep = new SoSeparator;
@@ -278,13 +337,34 @@ void AxisFlowCompass::applySettings()
 {
     const AxisFlowSettings& s = AxisFlowSettings::instance();
 
-    _animDurationS = static_cast<float>(s.compassRotateAnimation());
+    // A move fade is a MODULATION of the values written below, remembered from
+    // before it started. Rewriting them underneath a running fade would leave
+    // the fade to restore stale numbers when it lands -- the new
+    // FillTransparency would appear, then silently revert. Land it first.
+    if (_moveActive)
+        finishMove();
+
+    // A single gate for both animations. Folding the checkbox into the duration
+    // means every "is animation on?" test in this file stays the one that was
+    // already there (`_animDurationS <= 0`), so switching it off takes exactly
+    // the pre-animation code paths -- instant applyRotationNow(), instant jump,
+    // no ghost, no deep copy, and no timer sensor ever scheduled. That matters:
+    // the reason the checkbox exists is that the fade costs frames while a line
+    // is being drawn, and a half-disabled animation would still pay them.
+    _animDurationS = s.compassAnimation()
+                   ? static_cast<float>(s.compassRotateAnimation())
+                   : 0.0f;
+
+    // Switching it off mid-flight must not strand a rotation part-way. The move
+    // was already landed above, for the transparency-baseline reason.
+    if (_animDurationS <= 0.0f && _rotActive)
+        finishRotation();
 
     const float t = static_cast<float>(s.axisThicknessPx());
     _styleX->lineWidth.setValue(t);
     _styleY->lineWidth.setValue(t);
-    _colorX->rgb.setValue(rgbOf(s.axisColorX()));
-    _colorY->rgb.setValue(rgbOf(s.axisColorY()));
+    _colorX->diffuseColor.setValue(rgbOf(s.axisColorX()));
+    _colorY->diffuseColor.setValue(rgbOf(s.axisColorY()));
 
     // A centre point thinner than the axes would look like a rendering glitch.
     _dotStyle->pointSize.setValue(std::max(4.0f, t * 2.5f));
@@ -292,6 +372,10 @@ void AxisFlowCompass::applySettings()
     const float transp = static_cast<float>(s.fillTransparency());
     _fillSq->transparency.setValue(transp);
     _fillCi->transparency.setValue(transp);
+    // The outline tracks the fill exactly. It has its own material only because
+    // it has to be fadeable; visually it must not read as a separate border.
+    _outlineMatSq->transparency.setValue(transp);
+    _outlineMatCi->transparency.setValue(transp);
 
     // Live guide line: on/off, dash style, colour, transparency.
     applyGuideStyle(s.liveLineEnabled(), s.liveLineStyle(), s.liveLineColor(),
@@ -544,9 +628,161 @@ void AxisFlowCompass::setIndexingCandidates(bool distanceActive, bool axisActive
 
 void AxisFlowCompass::setOrigin(const SbVec3f& pt)
 {
+    // CALLED ON EVERY MOUSE MOVE, almost always with the value it already has
+    // (the tool re-anchors the compass from the service on each cursor event).
+    // Without this guard the fade would restart every frame and the compass
+    // would never arrive -- it would sit at a permanent half-opacity flicker.
+    const SbVec3f delta = pt - _origin;
+    const bool negligible = delta.length() < 1e-6f;
+    if (negligible && _hasOrigin)
+        return;
+
+    const SbVec3f from = _origin;
     _origin = pt;
     _transform->translation.setValue(pt);
+
+    // Snap when: animation disabled, or this is the first anchor ever
+    // (activation must not have the compass fly in from wherever the last
+    // session left it).
+    if (_animDurationS <= 0.0f || !_hasOrigin || negligible) {
+        _hasOrigin = true;
+        finishMove();
+        rebuildGuide();
+        return;
+    }
+
+    startMove(from);
     rebuildGuide();
+}
+
+void AxisFlowCompass::startMove(const SbVec3f& from)
+{
+    // A move retargeted mid-flight: land the previous one first, so materials
+    // are restored to their real values before they are sampled again as the
+    // new fade's baseline. Skipping this would ratchet the compass permanently
+    // translucent over a run of quick clicks.
+    if (_moveActive)
+        finishMove();
+
+    dropGhost();
+
+    // A snapshot, not a second compass kept in sync: the ghost is whatever the
+    // compass looked like at the moment it left, and it only has to survive
+    // half a second. copy(TRUE) is a deep copy, so its materials are its own
+    // and can be faded independently of the live ones.
+    //
+    // One known cosmetic gap: SoCallback carries its function in a plain
+    // pointer, not a field, so copy() does not bring it along. The ghost's
+    // centre dot therefore renders square rather than round. Both callbacks are
+    // lost together, so the GL state stays balanced -- it is a difference of a
+    // few pixels on a fading copy, not a leak.
+    if (_bodySep) {
+        SoNode* copy = _bodySep->copy(TRUE);
+        if (copy) {
+            _ghostBody = static_cast<SoSeparator*>(copy);
+            _ghostBody->ref();
+            _ghostSep->addChild(_ghostBody);
+            _ghostTransform->translation.setValue(from);
+            _ghostTransform->rotation.setValue(_transform->rotation.getValue());
+            _ghostSwitch->whichChild.setValue(0);
+            collectMaterials(_ghostBody, _ghostFade);
+        }
+    }
+
+    collectMaterials(_bodySep, _liveFade);
+    if (_liveFade.empty() && _ghostFade.empty()) {
+        dropGhost();                    // nothing to fade; the jump is instant
+        return;
+    }
+
+    _moveActive = true;
+    _moveT0 = SbTime::getTimeOfDay();
+    applyMoveFade(0.0f);
+    startAnimSensor();
+}
+
+void AxisFlowCompass::collectMaterials(
+        SoNode* root, std::vector<std::pair<SoMaterial*, float>>& out)
+{
+    out.clear();
+    if (!root)
+        return;
+    SoSearchAction sa;
+    sa.setType(SoMaterial::getClassTypeId());
+    sa.setInterest(SoSearchAction::ALL);
+    sa.setSearchingAll(TRUE);           // look inside SoSwitch: the contour that
+                                        // is currently hidden must fade too, or
+                                        // switching shape mid-fade pops
+    sa.apply(root);
+    const SoPathList& paths = sa.getPaths();
+    for (int i = 0; i < paths.getLength(); ++i) {
+        auto* mat = static_cast<SoMaterial*>(paths[i]->getTail());
+        const float base = mat->transparency.getNum() > 0
+                         ? mat->transparency[0] : 0.0f;
+        out.emplace_back(mat, base);
+    }
+}
+
+void AxisFlowCompass::applyMoveFade(float t)
+{
+    // t runs 0 -> 1 across the move. The live copy fades IN over it and the
+    // ghost fades OUT, simultaneously -- the compass appears to travel by
+    // dissolving from one place into the other.
+    //
+    // Transparency is modulated from each node's own value rather than written
+    // flat, so the contour fill keeps looking like its FillTransparency setting
+    // the whole way through instead of snapping to opaque at the end.
+    const float e = t * t * (3.0f - 2.0f * t);      // smoothstep, as the rotation
+    for (auto& entry : _liveFade) {
+        const float base = entry.second;
+        entry.first->transparency.setValue(base + (1.0f - base) * (1.0f - e));
+    }
+    for (auto& entry : _ghostFade) {
+        const float base = entry.second;
+        entry.first->transparency.setValue(base + (1.0f - base) * e);
+    }
+}
+
+void AxisFlowCompass::finishMove()
+{
+    // Restore EXACTLY, not "set to zero": these nodes carry real style
+    // (FillTransparency), and rounding the fade back down to 0 would quietly
+    // turn a translucent fill opaque after the first move.
+    for (auto& entry : _liveFade)
+        entry.first->transparency.setValue(entry.second);
+    _liveFade.clear();
+    dropGhost();
+    _moveActive = false;
+    stopAnimSensorIfIdle();
+}
+
+void AxisFlowCompass::dropGhost()
+{
+    _ghostFade.clear();
+    if (_ghostSwitch)
+        _ghostSwitch->whichChild.setValue(SO_SWITCH_NONE);
+    if (_ghostBody) {
+        if (_ghostSep)
+            _ghostSep->removeChild(_ghostBody);
+        _ghostBody->unref();
+        _ghostBody = nullptr;
+    }
+}
+
+void AxisFlowCompass::startAnimSensor()
+{
+    if (!_animSensor) {
+        _animSensor = new SoTimerSensor(&AxisFlowCompass::animTickCB, this);
+        _animSensor->setInterval(SbTime(1.0 / 60.0));
+    }
+    if (!_animSensor->isScheduled())
+        _animSensor->schedule();
+}
+
+void AxisFlowCompass::stopAnimSensorIfIdle()
+{
+    if (!_rotActive && !_moveActive && _animSensor && _animSensor->isScheduled())
+        _animSensor->unschedule();
 }
 
 AxisFlowCompass::~AxisFlowCompass()
@@ -556,6 +792,11 @@ AxisFlowCompass::~AxisFlowCompass()
         delete _animSensor;
         _animSensor = nullptr;
     }
+    // The ghost holds its own reference to a deep copy of the body; without
+    // this the copy outlives the compass whose death took its parent away.
+    _moveActive = false;
+    _liveFade.clear();
+    dropGhost();
     // The constructor ref'd the root; without the matching unref the whole
     // compass subgraph outlived every session, one leaked copy per tool.
     // The scenegraph holds its own reference until deactivate() removes it,
@@ -588,7 +829,8 @@ void AxisFlowCompass::setPlane(const SbVec3f& u, const SbVec3f& v, const SbVec3f
     const bool negligible = (probe - probeTgt).length() < 1e-6f
                          && std::fabs(_n.dot(n) - 1.0f) < 1e-6f;
     if (_animDurationS <= 0.0f || !_hasOrientation || negligible) {
-        if (_animSensor) _animSensor->unschedule();
+        _rotActive = false;
+        stopAnimSensorIfIdle();
         _hasOrientation = true;
         applyRotationNow(target);
         _u = u; _v = v; _n = n;   // exact basis, no numeric drift
@@ -601,12 +843,8 @@ void AxisFlowCompass::setPlane(const SbVec3f& u, const SbVec3f& v, const SbVec3f
     _animFrom = current;
     _animTo   = target;
     _animT0   = SbTime::getTimeOfDay();
-    if (!_animSensor) {
-        _animSensor = new SoTimerSensor(&AxisFlowCompass::animTickCB, this);
-        _animSensor->setInterval(SbTime(1.0 / 60.0));
-    }
-    if (!_animSensor->isScheduled())
-        _animSensor->schedule();
+    _rotActive = true;
+    startAnimSensor();
 }
 
 void AxisFlowCompass::animTickCB(void* data, SoSensor*)
@@ -616,24 +854,56 @@ void AxisFlowCompass::animTickCB(void* data, SoSensor*)
 
 void AxisFlowCompass::animTick()
 {
-    const double t = (SbTime::getTimeOfDay() - _animT0).getValue()
-                   / double(_animDurationS);
-    if (t >= 1.0) {
-        finishAnimation();
-        return;
+    const SbTime now = SbTime::getTimeOfDay();
+
+    // Two clocks, one timer. Either track may finish while the other keeps
+    // running, so each is tested on its own and the sensor stops only once both
+    // are done.
+    if (_rotActive) {
+        const double t = (now - _animT0).getValue() / double(_animDurationS);
+        if (t >= 1.0) {
+            finishRotation();
+        }
+        else {
+            const float e = float(t * t * (3.0 - 2.0 * t));   // smoothstep
+            applyRotationNow(SbRotation::slerp(_animFrom, _animTo, e));
+        }
     }
-    const float e = float(t * t * (3.0 - 2.0 * t));   // smoothstep ease in/out
-    applyRotationNow(SbRotation::slerp(_animFrom, _animTo, e));
-    rebuildGuide();
+
+    if (_moveActive) {
+        const double t = (now - _moveT0).getValue() / double(_animDurationS);
+        if (t >= 1.0) {
+            finishMove();
+        }
+        else {
+            applyMoveFade(float(t));
+            // The ghost was frozen at the old anchor but keeps the compass's
+            // orientation: if a rotation is running at the same time, letting
+            // the ghost turn with it reads as one object moving, not two.
+            if (_rotActive && _ghostTransform)
+                _ghostTransform->rotation.setValue(_transform->rotation.getValue());
+        }
+    }
+
+    // Rebuild the guide only when the FRAME moved. A rotation re-aims the axes,
+    // so the guide has to follow; a move fade does not touch it at all -- the
+    // anchor jumped to its final place before the first tick, and the fade only
+    // rewrites transparencies. Rebuilding it 60 times a second through every
+    // fade was pure waste, and it landed on exactly the workload where it hurt
+    // most: drawing a polyline re-anchors the compass after each point, so a
+    // long line paid a rebuild storm per segment.
+    if (_rotActive)
+        rebuildGuide();
+    stopAnimSensorIfIdle();
 }
 
-void AxisFlowCompass::finishAnimation()
+void AxisFlowCompass::finishRotation()
 {
-    if (_animSensor)
-        _animSensor->unschedule();
+    _rotActive = false;
     applyRotationNow(_animTo);
     _u = _animTgtU; _v = _animTgtV; _n = _animTgtN;   // land exactly
     rebuildGuide();
+    stopAnimSensorIfIdle();
 }
 
 void AxisFlowCompass::applyRotationNow(const SbRotation& r)
@@ -668,6 +938,16 @@ void AxisFlowCompass::setRadius(float worldRadius)
 
 void AxisFlowCompass::setVisible(bool on)
 {
+    // updateCompassVisibility() is now reachable from more places than it was,
+    // and writing a Coin field re-notifies the graph even when the value did not
+    // change. Cheap guard, so callers never have to think about it.
+    if (_visible == on)
+        return;
+    // Hiding mid-move would leave the fade running against nothing and, worse,
+    // leave the materials at whatever partial transparency the last tick wrote
+    // -- so the compass would come back translucent. Land it instead.
+    if (!on && _moveActive)
+        finishMove();
     _visible = on;
     _visSwitch->whichChild.setValue(on ? 0 : SO_SWITCH_NONE);
 }

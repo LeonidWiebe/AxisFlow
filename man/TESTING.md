@@ -122,7 +122,7 @@ set PATH=C:\projects\FreeCAD111\.pixi\envs\default\Library\bin;C:\projects\FreeC
 ctest --test-dir build -C RelWithDebInfo --output-on-failure
 ```
 
-### Offline: the line demo's own harness
+### Offline: the consumers' own harnesses
 
 `tests/demo_arc_harness.py` runs `axisflow_demo.py` against stubbed
 FreeCAD/Part modules, so the consumer-side bookkeeping -- which segment carries
@@ -132,7 +132,49 @@ plain `python3`, with no FreeCAD at all:
 
 ```bash
 python3 tests/demo_arc_harness.py
+python3 tests/transform_harness.py
+python3 tests/extrude_harness.py
 ```
+
+`transform_harness.py` does the same for the Move / Copy commands: that a
+pre-existing selection is used as-is, that the first click doubles as selection
+and base point when there is none, that clicking empty space does not consume
+the click, that the emitted `Draft.move(...)` string is right for both tools,
+and -- the one that matters most -- that the commit is **deferred** out of the
+event callback rather than run inline.
+
+`extrude_harness.py` also pins the **planarity tolerance**, with stub shapes that
+answer against the tolerance they are asked with rather than a fixed flag: that a
+wire flat to within float noise is accepted where OCC's default would refuse it,
+that a genuinely skew wire is still refused, and -- the interaction that is easy
+to get wrong -- that a straight line carrying the same noise stays classified as
+straight instead of being handed to a loose `find_plane()`, which would return a
+plane with an arbitrary normal.
+
+Both also cover **pick mode**: that the compass is hidden and the locate cursor
+raised while an object is awaited, that both come back the moment it is picked,
+that a cancelled pick restores them anyway, and that a compass which was off
+before the command is not switched on by it. The cached cursor is pre-seeded in
+the harnesses so the QPainter drawing is skipped -- stubbing QPixmap and QPainter
+well enough to draw would test Qt rather than us, while the set/unset bookkeeping
+is where a cursor can actually be leaked onto the viewport.
+
+`extrude_harness.py` covers the extrude command, which has more geometry
+bookkeeping than either: the sweep direction (a real plane hands over its axis;
+a STRAIGHT segment has no plane at all and falls back to vertical, and a
+vertical segment to horizontal, since sweeping it up would collapse the
+surface); that a non-planar wire and anything carrying faces are refused; that
+the selection gate goes on at start and comes back off on **every** exit path,
+the refusal included; that the picking click does not count as a point for this
+tool while Move still spends it on one; that the emitted `Part::Extrusion` has
+`Solid = False`, a normalised `Dir` and the height in `LengthFwd`; that an
+oblique drag stays oblique; and that the preview's quad bookkeeping matches the
+discretized wire and unrefs the scenegraph it attached to.
+
+Draft's `draftgeoutils` is stubbed there with the one behaviour that matters --
+`is_straight_line()` returning True and `find_plane()` returning None for a
+straight wire. That is not a convenience: it is why the fallback exists at all,
+and a stub that invented a plane for straight wires would test the wrong thing.
 
 ### Tier 2 -- by hand in a GUI FreeCAD
 

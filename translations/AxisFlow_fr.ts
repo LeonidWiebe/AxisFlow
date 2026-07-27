@@ -149,241 +149,250 @@
     </message>
     <message>
         <location filename="../axisflow_settings.py" line="194"/>
+        <source>Animate the compass</source>
+        <translation>Animer la boussole</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_settings.py" line="195"/>
         <source>Compass size (px)</source>
         <translation>Taille de la boussole (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="195"/>
+        <location filename="../axisflow_settings.py" line="196"/>
         <source>Axis thickness (px)</source>
         <translation>Épaisseur des axes (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="196"/>
+        <location filename="../axisflow_settings.py" line="197"/>
         <source>Axis start (fraction)</source>
         <translation>Début de l&apos;axe (fraction)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="197"/>
+        <location filename="../axisflow_settings.py" line="198"/>
         <source>Axis length (fraction)</source>
         <translation>Longueur de l&apos;axe (fraction)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="198"/>
+        <location filename="../axisflow_settings.py" line="199"/>
         <source>Fill transparency</source>
         <translation>Transparence du remplissage</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="199"/>
+        <location filename="../axisflow_settings.py" line="200"/>
         <source>X axis colour</source>
         <translation>Couleur de l&apos;axe X</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="200"/>
+        <location filename="../axisflow_settings.py" line="201"/>
         <source>Y axis colour</source>
         <translation>Couleur de l&apos;axe Y</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="201"/>
+        <location filename="../axisflow_settings.py" line="202"/>
         <source>Active field colour</source>
         <translation>Couleur du champ actif</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="203"/>
+        <location filename="../axisflow_settings.py" line="204"/>
         <source>Live Line</source>
         <translation>Ligne dynamique</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="204"/>
+        <location filename="../axisflow_settings.py" line="205"/>
         <source>Live line</source>
         <translation>Ligne dynamique</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="205"/>
+        <location filename="../axisflow_settings.py" line="206"/>
         <source>Live line style</source>
         <translation>Style de la ligne dynamique</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="206"/>
-        <location filename="../axisflow_settings.py" line="212"/>
+        <location filename="../axisflow_settings.py" line="207"/>
+        <location filename="../axisflow_settings.py" line="213"/>
         <source>Solid</source>
         <translation>Continu</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="206"/>
-        <location filename="../axisflow_settings.py" line="212"/>
+        <location filename="../axisflow_settings.py" line="207"/>
+        <location filename="../axisflow_settings.py" line="213"/>
         <source>Dashed</source>
         <translation>Tirets</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="207"/>
-        <location filename="../axisflow_settings.py" line="213"/>
+        <location filename="../axisflow_settings.py" line="208"/>
+        <location filename="../axisflow_settings.py" line="214"/>
         <source>Dotted</source>
         <translation>Pointillés</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="207"/>
-        <location filename="../axisflow_settings.py" line="213"/>
+        <location filename="../axisflow_settings.py" line="208"/>
+        <location filename="../axisflow_settings.py" line="214"/>
         <source>Dash-dot</source>
         <translation>Tiret-point</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="208"/>
+        <location filename="../axisflow_settings.py" line="209"/>
         <source>Live line colour</source>
         <translation>Couleur de la ligne dynamique</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="209"/>
+        <location filename="../axisflow_settings.py" line="210"/>
         <source>Live line transparency</source>
         <translation>Transparence de la ligne dynamique</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="210"/>
+        <location filename="../axisflow_settings.py" line="211"/>
         <source>Draw path to the point</source>
         <translation>Tracer le chemin vers le point</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="211"/>
+        <location filename="../axisflow_settings.py" line="212"/>
         <source>Path style</source>
         <translation>Style du chemin</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="214"/>
+        <location filename="../axisflow_settings.py" line="215"/>
         <source>Path colour</source>
         <translation>Couleur du chemin</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="215"/>
+        <location filename="../axisflow_settings.py" line="216"/>
         <source>Use distance indexing</source>
         <translation>Utiliser l&apos;indexation par distance</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="216"/>
+        <location filename="../axisflow_settings.py" line="217"/>
         <source>Use axes indexing</source>
         <translation>Utiliser l&apos;indexation par axes</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="217"/>
+        <location filename="../axisflow_settings.py" line="218"/>
         <source>Indexing tolerance (px)</source>
         <translation>Tolérance d&apos;indexation (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="218"/>
+        <location filename="../axisflow_settings.py" line="219"/>
         <source>Indexing axis weight (px)</source>
         <translation>Épaisseur de l&apos;axe d&apos;indexation (px)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="219"/>
+        <location filename="../axisflow_settings.py" line="220"/>
         <source>Indexing axis transparency</source>
         <translation>Transparence de l&apos;axe d&apos;indexation</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="221"/>
+        <location filename="../axisflow_settings.py" line="222"/>
         <source>Behaviour</source>
         <translation>Comportement</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="222"/>
+        <location filename="../axisflow_settings.py" line="223"/>
         <source>Use object snapping</source>
         <translation>Utiliser l&apos;accrochage aux objets</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="223"/>
+        <location filename="../axisflow_settings.py" line="224"/>
         <source>Smart negative direction</source>
         <translation>Direction négative intelligente</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="224"/>
+        <location filename="../axisflow_settings.py" line="225"/>
         <source>Focus advance on movement</source>
         <translation>Avance du focus au mouvement</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="225"/>
+        <location filename="../axisflow_settings.py" line="226"/>
         <source>Compass follows direction</source>
         <translation>Le compas suit la direction</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="226"/>
+        <location filename="../axisflow_settings.py" line="227"/>
         <source>Off</source>
         <translation>Désactivé</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="226"/>
+        <location filename="../axisflow_settings.py" line="227"/>
         <source>On (keep Z)</source>
         <translation>Activé (garder Z)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="227"/>
+        <location filename="../axisflow_settings.py" line="228"/>
         <source>On (full)</source>
         <translation>Activé (complet)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="228"/>
-        <source>Compass rotation animation (s)</source>
-        <translation>Animation de rotation du compas (s)</translation>
+        <location filename="../axisflow_settings.py" line="229"/>
+        <source>Compass animation (s)</source>
+        <translation>Animation de la boussole (s)</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="268"/>
+        <source>Compass rotation animation (s)</source>
+        <translation type="vanished">Animation de rotation du compas (s)</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_settings.py" line="269"/>
         <source>Pick colour</source>
         <translation>Choisir une couleur</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="280"/>
+        <location filename="../axisflow_settings.py" line="281"/>
         <source>AxisFlow settings</source>
         <translation>Paramètres AxisFlow</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="313"/>
+        <location filename="../axisflow_settings.py" line="314"/>
         <source>Restore defaults</source>
         <translation>Restaurer les valeurs par défaut</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="315"/>
+        <location filename="../axisflow_settings.py" line="316"/>
         <source>Restores the default values of this section only</source>
         <translation>Restaure les valeurs par défaut de cette section uniquement</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="328"/>
+        <location filename="../axisflow_settings.py" line="329"/>
         <source>Control hotkeys</source>
         <translation>Touches de contrôle</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="330"/>
+        <location filename="../axisflow_settings.py" line="331"/>
         <source>View hotkeys</source>
         <translation>Touches de vue</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="346"/>
+        <location filename="../axisflow_settings.py" line="347"/>
         <source>Close</source>
         <translation>Fermer</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="361"/>
+        <location filename="../axisflow_settings.py" line="362"/>
         <source>Click a key field, then press the key you want. Assigning replaces that action&apos;s current key(s). Keys work while AxisFlow is running.</source>
         <translation>Cliquez sur un champ de touche, puis appuyez sur la touche souhaitée. L&apos;attribution remplace la ou les touches actuelles de cette action. Les touches fonctionnent pendant qu&apos;AxisFlow est actif.</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="382"/>
+        <location filename="../axisflow_settings.py" line="383"/>
         <source>Unassign</source>
         <translation>Supprimer l&apos;attribution</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="390"/>
+        <location filename="../axisflow_settings.py" line="391"/>
         <source>Restore default keys</source>
         <translation>Restaurer les touches par défaut</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="391"/>
+        <location filename="../axisflow_settings.py" line="392"/>
         <source>Resets the keys of BOTH hotkey pages</source>
         <translation>Réinitialise les touches des DEUX pages</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="445"/>
-        <location filename="../axisflow_settings.py" line="483"/>
+        <location filename="../axisflow_settings.py" line="446"/>
+        <location filename="../axisflow_settings.py" line="484"/>
         <source>Key cannot be used</source>
         <translation>Touche inutilisable</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="446"/>
+        <location filename="../axisflow_settings.py" line="447"/>
         <source>{key} is already the {kind} used by &quot;{action}&quot;.
 
 A key is either a binding of its own or the first key of a two-key chord, never both.</source>
@@ -392,28 +401,68 @@ A key is either a binding of its own or the first key of a two-key chord, never 
 Une touche est soit une attribution à part entière, soit la première touche d&apos;une combinaison de deux touches, jamais les deux.</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="451"/>
+        <location filename="../axisflow_settings.py" line="452"/>
         <source>start of a chord</source>
         <translation>début d&apos;une combinaison</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="452"/>
+        <location filename="../axisflow_settings.py" line="453"/>
         <source>single key</source>
         <translation>touche simple</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="467"/>
+        <location filename="../axisflow_settings.py" line="468"/>
         <source>Key already used</source>
         <translation>Touche déjà utilisée</translation>
     </message>
     <message>
-        <location filename="../axisflow_settings.py" line="468"/>
+        <location filename="../axisflow_settings.py" line="469"/>
         <source>{key} is currently assigned to &quot;{action}&quot;.
 
 Reassign it? That action will be left without a key.</source>
         <translation>{key} est actuellement attribuée à « {action} ».
 
 La réattribuer ? Cette action restera sans touche.</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="211"/>
+        <source>Pick base point</source>
+        <translation>Choisissez le point de base</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="212"/>
+        <source>Pick target point</source>
+        <translation>Choisissez le point cible</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="238"/>
+        <source>No active document</source>
+        <translation>Aucun document actif</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="247"/>
+        <source>Click an object to transform (that click is also the base point)</source>
+        <translation>Cliquez sur un objet (ce clic est aussi le point de base)</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_transform.py" line="341"/>
+        <source>Nothing under the cursor -- click an object</source>
+        <translation>Rien sous le curseur — cliquez sur un objet</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_extrude.py" line="379"/>
+        <source>Drag or type the extrusion height</source>
+        <translation>Faites glisser ou saisissez la hauteur d&apos;extrusion</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_extrude.py" line="406"/>
+        <source>AxisFlow extrude: the wire is not planar -- there is no plane to be perpendicular to</source>
+        <translation>AxisFlow extrusion : la polyligne n&apos;est pas plane — il n&apos;y a aucun plan auquel être perpendiculaire</translation>
+    </message>
+    <message>
+        <location filename="../axisflow_extrude.py" line="416"/>
+        <source>AxisFlow extrude: sweeping all selected wires along the first one&apos;s normal</source>
+        <translation>AxisFlow extrusion : toutes les polylignes sélectionnées sont extrudées selon la normale de la première</translation>
     </message>
 </context>
 <context>
@@ -458,27 +507,66 @@ La réattribuer ? Cette action restera sans touche.</translation>
     </message>
 </context>
 <context>
+    <name>CmdAxisFlowCopy</name>
+    <message>
+        <location filename="../src/Command.cpp" line="155"/>
+        <source>Copy</source>
+        <translation>Copier</translation>
+    </message>
+    <message>
+        <location filename="../src/Command.cpp" line="156"/>
+        <source>Copy the selected objects to another point with the AxisFlow compass; the originals stay where they are</source>
+        <translation>Copie les objets sélectionnés vers un autre point avec le compas AxisFlow ; les originaux restent en place</translation>
+    </message>
+</context>
+<context>
     <name>CmdAxisFlowDrawLine</name>
     <message>
-        <location filename="../src/Command.cpp" line="157"/>
+        <location filename="../src/Command.cpp" line="257"/>
         <source>Draw line</source>
         <translation>Dessiner une ligne</translation>
     </message>
     <message>
-        <location filename="../src/Command.cpp" line="158"/>
+        <location filename="../src/Command.cpp" line="258"/>
         <source>Draw a polyline using the AxisFlow compass (Escape starts a new line, backtick ends the command)</source>
         <translation>Dessiner une polyligne avec la boussole AxisFlow (Échap commence une nouvelle ligne, l&apos;accent grave termine la commande)</translation>
     </message>
 </context>
 <context>
+    <name>CmdAxisFlowExtrude</name>
+    <message>
+        <location filename="../src/Command.cpp" line="186"/>
+        <source>Extrude</source>
+        <translation>Extruder</translation>
+    </message>
+    <message>
+        <location filename="../src/Command.cpp" line="187"/>
+        <source>Sweep a planar wire into a surface. The compass stands up along the wire&apos;s normal, so the height can be typed instead of dragged. A non-planar wire cannot be picked</source>
+        <translation>Extruder une polyligne plane en une surface. La boussole se dresse selon la normale de la polyligne, la hauteur peut donc être saisie au lieu d&apos;être tirée à la souris. Une polyligne non plane ne peut pas être sélectionnée</translation>
+    </message>
+</context>
+<context>
+    <name>CmdAxisFlowMove</name>
+    <message>
+        <location filename="../src/Command.cpp" line="123"/>
+        <source>Move</source>
+        <translation>Déplacer</translation>
+    </message>
+    <message>
+        <location filename="../src/Command.cpp" line="124"/>
+        <source>Move the selected objects with the AxisFlow compass. With nothing selected, the first click picks the object and doubles as the base point</source>
+        <translation>Déplace les objets sélectionnés avec le compas AxisFlow. Sans sélection, le premier clic choisit l&apos;objet et sert de point de base</translation>
+    </message>
+</context>
+<context>
     <name>CmdAxisFlowSettings</name>
     <message>
-        <location filename="../src/Command.cpp" line="195"/>
+        <location filename="../src/Command.cpp" line="295"/>
         <source>Settings</source>
         <translation>Paramètres</translation>
     </message>
     <message>
-        <location filename="../src/Command.cpp" line="196"/>
+        <location filename="../src/Command.cpp" line="296"/>
         <source>Open the AxisFlow settings (changes apply live)</source>
         <translation>Ouvrir les paramètres AxisFlow (les changements s&apos;appliquent immédiatement)</translation>
     </message>
@@ -486,12 +574,12 @@ La réattribuer ? Cette action restera sans touche.</translation>
 <context>
     <name>CmdAxisFlowToggleLiveLine</name>
     <message>
-        <location filename="../src/Command.cpp" line="119"/>
+        <location filename="../src/Command.cpp" line="219"/>
         <source>Toggle live line</source>
         <translation>Activer/désactiver la ligne dynamique</translation>
     </message>
     <message>
-        <location filename="../src/Command.cpp" line="120"/>
+        <location filename="../src/Command.cpp" line="220"/>
         <source>Show or hide the live guide line from the compass centre to the cursor</source>
         <translation>Afficher ou masquer la ligne de guidage du centre de la boussole vers le curseur</translation>
     </message>
