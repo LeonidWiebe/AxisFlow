@@ -8,7 +8,9 @@
 #include <QtWidgets/QVBoxLayout>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QToolButton>
+#include <QtGui/QColor>
 #include <QtGui/QKeyEvent>
+#include <QtGui/QShowEvent>
 #include <QtCore/QPoint>
 
 #include <Base/Vector3D.h>
@@ -37,6 +39,7 @@ public:
     static AxisFlowPanel* instance();
 
     explicit AxisFlowPanel(QWidget* parent = nullptr);
+    ~AxisFlowPanel() override;
 
     void setValues(double x, double y, double z);
     void setValuesDist(double dist, double angle, double z);
@@ -104,10 +107,14 @@ protected:
      *  with it. */
     void moveEvent(QMoveEvent* e) override;
     void hideEvent(QHideEvent* e) override;
+    void changeEvent(QEvent* event) override;
+    void showEvent(QShowEvent* event) override;
     /**
      * Filters the child line edits so bound letter keys (X/Y/Z/Space/...) act as
      * AxisFlow actions instead of being typed, while digits still edit the field.
      * Also drives window dragging from the title bar.
+     * The main-window filter only notices appearance events and never consumes
+     * them: keyboard and mouse handling on that window stay with FreeCAD.
      */
     bool eventFilter(QObject* obj, QEvent* ev) override;
 
@@ -125,8 +132,31 @@ private:
     void pushFieldValue(int index, const QString& text);
     /** The line edit currently receiving typed characters. */
     QLineEdit* entryEdit();
-    /** Repaint the field backgrounds so the active one stands out. */
+    /** Repaint the active field from the cached theme colors. */
     void refreshActiveHighlight();
+    /** Read the current theme into _theme and apply it. Safe to call again. */
+    void syncThemeAppearance();
+    /** Panel fill, label fallback and the close icon. Does not touch field text. */
+    void applyPanelChrome();
+    /** Chord hint uses the panel fill and a readable foreground. NoFocus stays. */
+    void applyChordHintTheme();
+    /** Stylesheet for the active coordinate field, or empty when theme is unknown. */
+    QString activeFieldStyleSheet() const;
+
+    /**
+     * Colors resolved from Qt palette roles of widgets the theme actually
+     * paints. Not a theme name and not a copy of a stylesheet file.
+     */
+    struct ThemeColors {
+        QColor window;
+        QColor windowText;
+        QColor base;
+        QColor text;
+        QColor highlight;
+        QColor highlightedText;
+        bool valid {false};
+    };
+    ThemeColors sampleThemeColors() const;
     /** Pick the active field from the axis the cursor leans towards. */
     void updateActiveFieldFromCursor();
     /** Focus advance on movement: after a value is typed into an in-plane
@@ -190,6 +220,12 @@ private:
     /** Always 0..2 (0/1 in polar). Frozen while _entryField >= 0. */
     int          _activeField { 0 };
     bool         _ownsInput   { false };   // AxisFlow drives input (own tool)
+
+    /** False until buildUi has created the widgets changeEvent may touch. */
+    bool         _uiReady { false };
+    /** setPalette/setStyleSheet emit the same events that start a refresh. */
+    bool         _applyingTheme { false };
+    ThemeColors  _theme;
 };
 
 } // namespace AxisFlowGui

@@ -34,6 +34,17 @@ Name releases accordingly, e.g. `AxisFlow-0.2.1-win64-FC1.1.zip`.
    configures CMake. `stage_dist.bat` (and so `make_release.bat` and
    `build_installer.bat`) only builds an already-configured `build\` tree.
 
+0b. NSIS does not need to be on PATH for `build_installer.bat` -- it also looks
+   in both default `Program Files\NSIS\` locations. Installed elsewhere?
+   `set "MAKENSIS=D:\path\to\NSIS\makensis.exe" && build_installer.bat`.
+
+0c. Branding artwork: the installer picks up `installer\assets\` if it is there
+   and falls back to the stock NSIS look if it is not. NSIS reads neither PNG
+   nor SVG, so regenerate from the source art after changing it --
+   `python installer/make_assets.py` turns `logotip.png` into the two BMPs and
+   `logotip2.png` into the .ico -- and COMMIT the results. The installer build
+   itself must keep needing nothing but makensis.
+
 1. Bump the version in ALL of these -- they drift apart otherwise:
    `package.xml` (`<version>` and `<date>`), `CMakeLists.txt` (`project(...)`),
    `make_release.bat`, `build_installer.bat`, `installer/AxisFlow.nsi`

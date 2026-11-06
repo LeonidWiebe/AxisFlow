@@ -25,8 +25,12 @@
 #include <QtGui/QScreen>
 #include <QtGui/QPalette>
 #include <QtGui/QMouseEvent>
+#include <QtGui/QShowEvent>
+#include <QtWidgets/QApplication>
 #include <QtWidgets/QFrame>
 #include <QtWidgets/QStyle>
+
+#include <algorithm>
 
 #include <cmath>
 #include <limits>
@@ -60,10 +64,28 @@ AxisFlowPanel::AxisFlowPanel(QWidget* parent)
     wireToService();
     setWindowTitle(QLatin1String("AxisFlow"));
     setAttribute(Qt::WA_ShowWithoutActivating);
+    // Events during buildUi run before the child widgets exist.
+    _uiReady = true;
+    if (QWidget* host = parentWidget())
+        host->installEventFilter(this);
+    syncThemeAppearance();
+}
+
+AxisFlowPanel::~AxisFlowPanel()
+{
+    if (QWidget* host = parentWidget())
+        host->removeEventFilter(this);
 }
 
 void AxisFlowPanel::buildUi()
 {
+    // A frameless tool window is not a QMainWindow or QDialog, so FreeCAD's
+    // stylesheet does not fill it. The object name lets a later rule paint
+    // this widget alone.
+    setObjectName(QStringLiteral("AxisFlowPanel"));
+    setAttribute(Qt::WA_StyledBackground, true);
+    setAutoFillBackground(true);
+
     auto* mainLayout = new QVBoxLayout(this);
     mainLayout->setContentsMargins(8, 6, 8, 6);
     mainLayout->setSpacing(4);
@@ -138,12 +160,7 @@ void AxisFlowPanel::buildUi()
     _chordHint->setFrameShape(QFrame::StyledPanel);
     _chordHint->setMargin(6);
     _chordHint->setAutoFillBackground(true);
-    // Borrow the tool-tip colours so it reads as a transient hint whatever the
-    // user's theme is.
-    QPalette hintPal = _chordHint->palette();
-    hintPal.setColor(QPalette::Window,     hintPal.color(QPalette::ToolTipBase));
-    hintPal.setColor(QPalette::WindowText, hintPal.color(QPalette::ToolTipText));
-    _chordHint->setPalette(hintPal);
+    // Hidden until a chord. The theme pass paints it from the panel colours.
     QFont hf = _chordHint->font();
     hf.setBold(true);
     _chordHint->setFont(hf);
@@ -205,9 +222,10 @@ void AxisFlowPanel::wireToService()
     _editB->installEventFilter(this);
     _editC->installEventFilter(this);
 
-    // The highlight colour is a setting, so follow it live.
+    // The highlight colour is a setting, so follow it live. The handler also
+    // reapplies the theme; it does not rewrite the stored color.
     connect(&AxisFlowSettings::instance(), &AxisFlowSettings::changed,
-            this, [this]{ refreshActiveHighlight(); });
+            this, [this]{ syncThemeAppearance(); });
 
     // A confirmed point clears overrides in the solver; drop our entry state too
     // so the fields follow the cursor again and the next digit starts fresh.
@@ -222,7 +240,6 @@ void AxisFlowPanel::wireToService()
     // Initial sync.
     updateFrameButton();
     AxisFlowService::instance().setLocalFrame(!_worldFrame);   // default: Local
-    refreshActiveHighlight();
     onServiceState();
 }
 
@@ -608,19 +625,311 @@ void AxisFlowPanel::updateActiveFieldFromCursor()
     }
 }
 
+namespace {
+
+constexpr double kReadableContrast = 4.5;
+
+double linearChannel(double value)
+{
+    return value <= 0.04045 ? value / 12.92 : std::pow((value + 0.055) / 1.055, 2.4);
+}
+
+double relativeLuminance(const QColor& color)
+{
+    return 0.2126 * linearChannel(color.redF())
+         + 0.7152 * linearChannel(color.greenF())
+         + 0.0722 * linearChannel(color.blueF());
+}
+
+double contrastRatio(const QColor& a, const QColor& b)
+{
+    const double left = relativeLuminance(a);
+    const double right = relativeLuminance(b);
+    const double lighter = std::max(left, right);
+    const double darker = std::min(left, right);
+    return (lighter + 0.05) / (darker + 0.05);
+}
+
+QColor blendOver(const QColor& src, const QColor& dst, double amount)
+{
+    const double alpha = std::clamp(amount, 0.0, 1.0);
+    auto channel = [&](int from, int to) {
+        return std::clamp(static_cast<int>(std::lround(from * alpha + to * (1.0 - alpha))), 0, 255);
+    };
+    return QColor(channel(src.red(), dst.red()),
+                  channel(src.green(), dst.green()),
+                  channel(src.blue(), dst.blue()));
+}
+
+QColor emphasize(const QColor& base)
+{
+    const int delta = relativeLuminance(base) > 0.45 ? -48 : 48;
+    auto channel = [&](int value) { return std::clamp(value + delta, 0, 255); };
+    return QColor(channel(base.red()), channel(base.green()), channel(base.blue()));
+}
+
+QColor readableForeground(const QColor& background, const QColor& preferred)
+{
+    const QColor preferredRgb(preferred.red(), preferred.green(), preferred.blue());
+    if (contrastRatio(preferredRgb, background) >= kReadableContrast)
+        return preferredRgb;
+    const QColor black(0, 0, 0);
+    const QColor white(255, 255, 255);
+    return contrastRatio(black, background) >= contrastRatio(white, background) ? black : white;
+}
+
+QString cssColor(const QColor& color)
+{
+    return QStringLiteral("rgba(%1,%2,%3,%4)")
+        .arg(color.red())
+        .arg(color.green())
+        .arg(color.blue())
+        .arg(QString::number(color.alphaF(), 'f', 3));
+}
+
+bool sameColor(const QColor& a, const QColor& b)
+{
+    return a.red() == b.red()
+        && a.green() == b.green()
+        && a.blue() == b.blue()
+        && a.alpha() == b.alpha();
+}
+
+} // namespace
+
+void AxisFlowPanel::changeEvent(QEvent* event)
+{
+    QWidget::changeEvent(event);
+    if (!_uiReady || !event)
+        return;
+    switch (event->type()) {
+    case QEvent::PaletteChange:
+    case QEvent::ApplicationPaletteChange:
+    case QEvent::StyleChange:
+        syncThemeAppearance();
+        break;
+    default:
+        break;
+    }
+}
+
+void AxisFlowPanel::showEvent(QShowEvent* event)
+{
+    QWidget::showEvent(event);
+    if (_uiReady)
+        syncThemeAppearance();
+}
+
+AxisFlowPanel::ThemeColors AxisFlowPanel::sampleThemeColors() const
+{
+    // Sample widgets this panel does not recolor. The active field's stylesheet
+    // would otherwise be read back as if it were the theme.
+    ThemeColors colors;
+    QLineEdit* edits[3] = { _editA, _editB, _editC };
+    QLineEdit* source = nullptr;
+    for (QLineEdit* edit : edits) {
+        if (edit && edit->styleSheet().isEmpty()) {
+            source = edit;
+            break;
+        }
+    }
+    if (!source)
+        source = _editA;
+    if (!source)
+        return colors;
+
+    source->ensurePolished();
+    const QPalette field = source->palette();
+    colors.base = field.color(QPalette::Base);
+    colors.text = field.color(QPalette::Text);
+    colors.highlight = field.color(QPalette::Highlight);
+    colors.highlightedText = field.color(QPalette::HighlightedText);
+    colors.windowText = colors.text;
+
+    const QColor appWindow = QApplication::palette().color(QPalette::Window);
+    QColor window = appWindow;
+    if (QWidget* host = parentWidget())
+        window = host->palette().color(QPalette::Window);
+    // FreeCAD's stylesheet sets `* { color }` and fills QMainWindow/QDialog/
+    // QLineEdit, but it deliberately has no QWidget background rule. A frameless
+    // tool window therefore keeps the ordinary Window color while its labels
+    // use the theme foreground. When that pair does not contrast and the field
+    // background does, the field role is the theme color Qt actually resolved.
+    if (contrastRatio(colors.windowText, window) < kReadableContrast
+        && contrastRatio(colors.windowText, colors.base) >= kReadableContrast)
+        window = colors.base;
+    colors.window = QColor(window.red(), window.green(), window.blue());
+    colors.valid = colors.window.isValid() && colors.text.isValid() && colors.base.isValid();
+    return colors;
+}
+
+void AxisFlowPanel::syncThemeAppearance()
+{
+    if (_applyingTheme || !_uiReady || !_editA || !_title || !_chordHint)
+        return;
+    _applyingTheme = true;
+    const ThemeColors sampled = sampleThemeColors();
+    if (sampled.valid)
+        _theme = sampled;
+    applyPanelChrome();
+    applyChordHintTheme();
+    refreshActiveHighlight();
+    _applyingTheme = false;
+}
+
+void AxisFlowPanel::applyPanelChrome()
+{
+    if (!_theme.valid)
+        return;
+
+    const bool textFits = contrastRatio(_theme.windowText, _theme.window) >= kReadableContrast;
+    const QColor labelFg = textFits
+        ? QColor(_theme.windowText.red(), _theme.windowText.green(), _theme.windowText.blue())
+        : readableForeground(_theme.window, _theme.windowText);
+    // An empty sheet leaves the theme foreground in place. A color is written
+    // only when that foreground does not contrast with the fill we resolved.
+    const QString labelCss = textFits
+        ? QString()
+        : QStringLiteral("color: %1;").arg(cssColor(labelFg));
+
+    QPalette pal = palette();
+    if (!sameColor(pal.color(QPalette::Window), _theme.window)
+        || !sameColor(pal.color(QPalette::WindowText), labelFg)) {
+        pal.setColor(QPalette::Window, _theme.window);
+        pal.setColor(QPalette::WindowText, labelFg);
+        setPalette(pal);
+    }
+
+    const QString panelCss = QStringLiteral(
+        "QWidget#AxisFlowPanel { background-color: %1; }").arg(cssColor(_theme.window));
+    if (styleSheet() != panelCss)
+        setStyleSheet(panelCss);
+
+    for (QLabel* label : {_title, _labelA, _labelB, _labelC}) {
+        if (!label)
+            continue;
+        if (label->styleSheet() != labelCss)
+            label->setStyleSheet(labelCss);
+        QPalette labelPal = label->palette();
+        if (!sameColor(labelPal.color(QPalette::Window), _theme.window)
+            || !sameColor(labelPal.color(QPalette::WindowText), labelFg)) {
+            labelPal.setColor(QPalette::Window, _theme.window);
+            labelPal.setColor(QPalette::WindowText, labelFg);
+            label->setPalette(labelPal);
+        }
+    }
+
+    // Local/World and the lock boxes stay on the Qt style and the application
+    // stylesheet, including the checkbox indicator. Only the stock close icon
+    // is refreshed, so a style change can replace it.
+    if (_powerBtn)
+        _powerBtn->setIcon(style()->standardIcon(QStyle::SP_TitleBarCloseButton));
+}
+
+void AxisFlowPanel::applyChordHintTheme()
+{
+    if (!_chordHint || !_theme.valid)
+        return;
+
+    // This QLabel is not a QToolTip, so FreeCAD's tooltip stylesheet does not
+    // paint it. Use the panel fill already resolved for this theme.
+    const QColor background(_theme.window.red(), _theme.window.green(), _theme.window.blue());
+    const QColor foreground = readableForeground(background, _theme.windowText);
+    const QString hintCss = QStringLiteral("background-color: %1; color: %2;")
+        .arg(cssColor(background), cssColor(foreground));
+    if (_chordHint->styleSheet() != hintCss)
+        _chordHint->setStyleSheet(hintCss);
+
+    QPalette hintPal = _chordHint->palette();
+    if (!sameColor(hintPal.color(QPalette::Window), background)
+        || !sameColor(hintPal.color(QPalette::WindowText), foreground)) {
+        hintPal.setColor(QPalette::Window, background);
+        hintPal.setColor(QPalette::WindowText, foreground);
+        _chordHint->setPalette(hintPal);
+    }
+}
+
+QString AxisFlowPanel::activeFieldStyleSheet() const
+{
+    if (!_theme.valid)
+        return QString();
+
+    const unsigned long rgba = AxisFlowSettings::instance().activeFieldColor();
+    QColor fieldBg;
+    if (rgba == AxisFlowDefaults::activeFieldColor) {
+        // The saved factory value is indistinguishable from "never changed".
+        fieldBg = blendOver(_theme.highlight, _theme.base, 0.55);
+        if (contrastRatio(fieldBg, _theme.base) < 1.2)
+            fieldBg = emphasize(_theme.base);
+    }
+    else {
+        float r, g, b, a;
+        AxisFlowSettings::unpackColor(rgba, r, g, b, a);
+        QColor src;
+        src.setRgbF(std::clamp(r, 0.0f, 1.0f),
+                    std::clamp(g, 0.0f, 1.0f),
+                    std::clamp(b, 0.0f, 1.0f),
+                    std::clamp(a, 0.0f, 1.0f));
+        fieldBg = blendOver(src, _theme.base, src.alphaF());
+    }
+
+    const QColor fieldFg = readableForeground(fieldBg, _theme.text);
+    QColor selectionBg(_theme.highlight.red(), _theme.highlight.green(), _theme.highlight.blue());
+    if (contrastRatio(selectionBg, fieldBg) < 1.3) {
+        selectionBg = relativeLuminance(fieldBg) > 0.5
+            ? QColor(0, 0, 0)
+            : QColor(255, 255, 255);
+    }
+    const QColor selectionFg = readableForeground(selectionBg, _theme.highlightedText);
+    return QStringLiteral(
+        "QLineEdit { background-color: %1; color: %2; "
+        "selection-background-color: %3; selection-color: %4; }")
+        .arg(cssColor(fieldBg), cssColor(fieldFg), cssColor(selectionBg), cssColor(selectionFg));
+}
+
 void AxisFlowPanel::refreshActiveHighlight()
 {
-    const unsigned long rgba = AxisFlowSettings::instance().activeFieldColor();
-    float r, g, b, a;
-    AxisFlowSettings::unpackColor(rgba, r, g, b, a);
+    if (!_editA || !_editB || !_editC)
+        return;
 
-    const QString css = QStringLiteral("QLineEdit { background-color: rgba(%1,%2,%3,%4); }")
-        .arg(int(r * 255.0f)).arg(int(g * 255.0f))
-        .arg(int(b * 255.0f)).arg(QString::number(a, 'f', 3));
-
+    const QString activeCss = activeFieldStyleSheet();
     QLineEdit* edits[3] = { _editA, _editB, _editC };
-    for (int i = 0; i < 3; ++i)
-        edits[i]->setStyleSheet(i == _activeField ? css : QString());
+    for (int i = 0; i < 3; ++i) {
+        QLineEdit* edit = edits[i];
+        const QString want = (i == _activeField) ? activeCss : QString();
+        if (edit->styleSheet() == want)
+            continue;
+        const QString text = edit->text();
+        const int cursor = edit->cursorPosition();
+        const int selStart = edit->selectionStart();
+        const int selLength = selStart >= 0 ? edit->selectedText().size() : 0;
+        edit->setStyleSheet(want);
+        if (edit->text() != text)
+            edit->setText(text);
+
+        const int afterStart = edit->selectionStart();
+        const int afterLength = afterStart >= 0 ? edit->selectedText().size() : 0;
+        const bool unchanged = edit->text() == text
+            && edit->cursorPosition() == cursor
+            && afterStart == selStart
+            && afterLength == selLength;
+        if (unchanged)
+            continue;
+
+        if (selLength > 0) {
+            // QLineEdit::setSelection(start, length) accepts a negative length.
+            // The caret stays at start+length: positive length puts it on the
+            // right of the range, negative length puts it on the left.
+            // setCursorPosition after setSelection would clear the selection.
+            const int right = selStart + selLength;
+            if (cursor == selStart)
+                edit->setSelection(right, -selLength);
+            else
+                edit->setSelection(selStart, selLength);
+        } else if (edit->cursorPosition() != cursor) {
+            edit->setCursorPosition(cursor);
+        }
+    }
 }
 
 QLineEdit* AxisFlowPanel::entryEdit()
@@ -727,6 +1036,16 @@ void AxisFlowPanel::cancelInput()
 
 bool AxisFlowPanel::eventFilter(QObject* obj, QEvent* ev)
 {
+    // Appearance only. Returning false leaves key and mouse delivery unchanged.
+    if (obj == parentWidget()) {
+        const QEvent::Type type = ev->type();
+        if (type == QEvent::StyleChange
+            || type == QEvent::PaletteChange
+            || type == QEvent::ApplicationPaletteChange)
+            syncThemeAppearance();
+        return false;
+    }
+
     // Drag the frameless window by its title label.
     if (obj == _title) {
         if (ev->type() == QEvent::MouseButtonPress) {

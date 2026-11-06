@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 While the project is in `0.x` (alpha), the public API may still change between
 minor releases.
 
+## [Unreleased]
+
+### Changed
+- The floating coordinate panel follows the current FreeCAD theme, including a
+  theme switch while the panel exists. Colours come from Qt palette roles of
+  the theme that is already loaded; no theme name is guessed and the rest of
+  FreeCAD is not recolored.
+- The factory active-field colour is now an automatic theme highlight with a
+  matched text colour and a visible text selection. A custom Active field
+  colour is composited over the theme field, including its alpha, and keeps a
+  readable foreground. The saved setting is not rewritten. An explicitly saved
+  copy of the factory value is treated as automatic, because it is the same
+  value.
+- Coordinate input, locks and shortcuts are unchanged. The panel has not been
+  built or installed, so a running FreeCAD does not show this until a
+  compatible binary is produced.
+- The chord hint uses the panel background and a readable foreground from that
+  pair. It does not read the tooltip palette.
+- Restyling a field keeps the selection range and the caret end. A right-to-left
+  selection is restored with a negative `QLineEdit::setSelection` length, and
+  only when the style change moved the range or the caret. This has not been
+  checked in the GUI.
+
 ## [0.2.1] - 2026-07-27
 
 ### Added
@@ -107,6 +130,45 @@ minor releases.
   arbitrary normal — the "privileged directions" trap Draft warns about.
   Genuinely skew wires are still refused; an out-of-plane point from an object
   snap is still passed through rather than flattened.
+- The installer can carry branding: `MUI_ICON`, the welcome/finish panel and the
+  page header, for both the installer and the uninstaller. NSIS reads neither
+  PNG nor anything else modern — per the Modern UI 2 reference the icon must be
+  a real `.ico` and the page artwork 24-bit BMPs at 164x314 and 150x57 — so
+  `installer/make_assets.py` converts the source PNGs, fitting rather than
+  stretching them (almost no logo is shaped like a 164x314 strip) and flattening
+  transparency onto a chosen background, since 32-bit BMPs with alpha render as
+  a black box on some Windows versions. The generated files are committed and
+  every reference is guarded with `!if /FileExists`, so a checkout without the
+  artwork still builds, with the stock NSIS look, and `build_installer.bat`
+  still needs nothing but makensis.
+  The background is removed by flood-filling from the four corners rather than
+  by a "white becomes transparent" threshold — the compass has a white dial face
+  and white arrow tips, and the global rule would punch holes through them.
+  Without it the icon would have installed as a plain white tile, since the
+  source art is opaque RGB. The 150x57 header defaults to the bare mark instead
+  of the full logo: a square logo with a tagline lands 57 px tall there, where
+  the wordmark is a smear.
+- The installer asked the user to close FreeCAD and took their word for it. It
+  now checks, and checks the right thing: not whether FreeCAD is running, but
+  whether the installed `AxisFlow.pyd` can be opened for writing. FreeCAD
+  running *without* AxisFlow loaded installs fine — blocking on the process
+  would refuse installs that would have succeeded — while a FreeCAD that has
+  loaded it holds the module mapped as an image section and Windows denies
+  write sharing, which is exactly what made `File` fail halfway and leave a
+  half-written folder. The test is a plain `FileOpen` in append mode, so no
+  third-party plugin (nsProcess, FindProcDLL) has to be dropped into every
+  builder's NSIS. It runs on leaving the directory page and again just before
+  the first file is written, and offers Retry rather than aborting. The
+  uninstaller does the same: `RMDir /r` silently skips what it cannot delete,
+  so it used to report success and leave the module behind.
+- The NSIS build failed on `LicenseData: open failed "LICENSE"`. makensis
+  changes the current directory to the one holding the `.nsi` unless told not
+  to, so every relative path in the script resolved against `installer\`
+  instead of the repo root — `LICENSE` first, and `dist\AxisFlow` and the
+  output `setup.exe` immediately after it. `build_installer.bat` now passes
+  `/NOCD`, and the assumption is spelled out in the `.nsi` header, which
+  previously claimed the paths were relative to the repo root without saying
+  what made them so.
 - `stage_dist.bat` located the built `.pyd` with `for /r ... in (AxisFlow.pyd)`,
   which does not search: given a set with no wildcard, `for /r` simply prepends
   every directory under the tree to the name, existing or not. `PYD` therefore

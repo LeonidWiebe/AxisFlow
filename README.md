@@ -52,6 +52,46 @@ typed -- values are entered in the document's base unit. The parser behind them
 (`Base::Quantity`) already understands units; re-allowing letters in the field
 validator is what is missing.
 
+## Panel theme
+
+The floating panel follows the FreeCAD theme that is current when the panel
+is shown and when FreeCAD changes the theme while the panel is open. AxisFlow
+does not have to be restarted for a theme that FreeCAD applies immediately.
+Background, labels and fields use Qt's palette roles for the theme that is
+already loaded. AxisFlow does not guess a theme by name and does not recolor
+the rest of FreeCAD.
+
+**Active field colour** (Compass section of the AxisFlow settings) still
+overrides the active field. The factory value is automatic: the field uses a
+theme highlight and a text colour chosen to stay readable, and the selection
+stays visible. A custom colour is drawn over the theme field background,
+including its transparency, and the text colour is chosen for contrast. The
+saved value is not rewritten. The factory value and an explicitly saved copy
+of that same value are treated the same, because they are the same number; the
+settings swatch can still show the old grey while the panel uses the automatic
+highlight.
+
+Lock checkboxes, the Local/World button and the close button keep the normal
+Qt / FreeCAD style. The close icon is taken again from that style when the
+theme is applied. Typing, locks, the coordinate frame and shortcuts are
+unchanged.
+
+The chord hint uses the panel background and a readable text colour from that
+same pair. It is not taken from the tooltip palette. The hint stays a separate
+window and does not take focus.
+
+When a theme restyle touches a coordinate field, the code keeps the selected
+range and which end holds the caret. A selection made from right to left is
+restored with a negative length in `QLineEdit::setSelection`, and only if the
+style change actually moved the range or the caret. That path has not been
+run in FreeCAD.
+
+A third-party stylesheet that paints controls without putting those colours
+into Qt palette roles can leave the panel on the ordinary window colour.
+AxisFlow does not parse stylesheet files. This source change is not visible
+until a binary built against the same FreeCAD is installed. That build has not
+been run, and the panel contrast issue is not confirmed fixed.
+
 ## Object snapping
 
 AxisFlow does not implement its own snapping: inside its tools it asks FreeCAD's `Snapper`, so

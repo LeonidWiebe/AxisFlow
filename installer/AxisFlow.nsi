@@ -8,8 +8,12 @@
 ;  A compiled .pyd only loads in a FreeCAD whose Python/Qt/Coin ABI matches the
 ;  one it was built against (target here: FreeCAD 1.1, Windows 64-bit).
 ;
-;  Build it via build_installer.bat (which stages dist\AxisFlow first, then runs
-;  makensis from the repo root -- all paths below are relative to that root).
+;  Build it via build_installer.bat, which stages dist\AxisFlow first and then
+;  runs makensis WITH /NOCD from the repo root. The switch is load-bearing:
+;  makensis otherwise chdirs to the directory holding this .nsi, and every
+;  relative path below -- "LICENSE", ${SRCDIR}, OutFile -- would resolve against
+;  installer\ instead of the repo root. Running makensis on this file by hand
+;  without /NOCD fails on the licence page.
 ; ===========================================================================
 
 Unicode true
@@ -43,6 +47,36 @@ InstallDirRegKey HKCU "Software\${APPNAME}" "InstallDir"
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 
+; ---- branding (optional) ----
+; Generated from logotip.png / logotip2.png by installer\make_assets.py and
+; committed, so building the installer needs only makensis -- no Python, no
+; Pillow. NSIS reads neither PNG nor anything else modern: the page artwork has
+; to be a 24-bit BMP at a fixed size and the icon a real .ico, which is what
+; that script produces.
+;
+; Guarded with /FileExists on purpose. A define pointing at a missing image
+; aborts the whole compile, exactly the way the LICENSE path did -- and someone
+; building from a checkout without the artwork should get the stock NSIS look,
+; not a broken build. Paths are relative to the REPO ROOT, which is what /NOCD
+; in build_installer.bat guarantees.
+!if /FileExists "installer\assets\AxisFlow.ico"
+  !define MUI_ICON   "installer\assets\AxisFlow.ico"
+  ; Same file for the uninstaller: NSIS is fussy about the two icons matching in
+  ; structure, and there is no reason for them to differ.
+  !define MUI_UNICON "installer\assets\AxisFlow.ico"
+!endif
+
+!if /FileExists "installer\assets\welcome.bmp"
+  !define MUI_WELCOMEFINISHPAGE_BITMAP   "installer\assets\welcome.bmp"
+  !define MUI_UNWELCOMEFINISHPAGE_BITMAP "installer\assets\welcome.bmp"
+!endif
+
+!if /FileExists "installer\assets\header.bmp"
+  !define MUI_HEADERIMAGE
+  !define MUI_HEADERIMAGE_BITMAP   "installer\assets\header.bmp"
+  !define MUI_HEADERIMAGE_UNBITMAP "installer\assets\header.bmp"
+!endif
+
 ; ---- version info on the setup .exe ----
 VIProductVersion "${APPVERSION}.0"
 VIAddVersionKey  "ProductName"    "${APPNAME}"
@@ -60,6 +94,10 @@ VIAddVersionKey  "FileDescription" "${APPNAME} FreeCAD workbench installer"
 !insertmacro MUI_PAGE_LICENSE "LICENSE"
 
 !define MUI_DIRECTORYPAGE_TEXT_TOP "AxisFlow will be installed into the folder below -- your FreeCAD Mod directory, in an 'AxisFlow' subfolder. If your FreeCAD uses a different data directory, adjust it here. Tip: in FreeCAD's Python console, App.getUserAppDataDir() prints the base path (then append \Mod\AxisFlow)."
+; Checked on LEAVING the directory page: the earliest moment $INSTDIR is final,
+; and still before the install page, so a locked module costs the user a Retry
+; rather than a half-written folder.
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE EnsureWritable
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 
@@ -72,12 +110,66 @@ VIAddVersionKey  "FileDescription" "${APPNAME} FreeCAD workbench installer"
 
 !insertmacro MUI_LANGUAGE "English"
 
+; ---- is the installed module locked? ------------------------------------
+; Testing for a LOCKED MODULE rather than for a running FreeCAD, because that
+; is the condition that actually matters. FreeCAD running without AxisFlow
+; loaded installs perfectly well -- the user just restarts afterwards -- so
+; blocking on the process would refuse installs that would have succeeded.
+; Conversely a FreeCAD with AxisFlow loaded holds AxisFlow.pyd mapped as an
+; image section, and Windows denies write sharing on it. That is exactly what
+; would make File fail halfway through, leaving a half-installed folder.
+;
+; The test is FileOpen in append mode: it asks for write access without
+; truncating (mode "w" would empty the file it is testing). No plugin needed --
+; nsProcess and FindProcDLL are third-party and would have to be dropped into
+; every builder's NSIS installation.
+;
+; $0 = "1" if we cannot write to it.
+!macro ModuleLockedInto DIR
+  Push $1
+  StrCpy $0 "0"
+  ${If} ${FileExists} "${DIR}\AxisFlow.pyd"
+    ClearErrors
+    FileOpen $1 "${DIR}\AxisFlow.pyd" a
+    ${If} ${Errors}
+      StrCpy $0 "1"
+    ${Else}
+      FileClose $1
+    ${EndIf}
+  ${EndIf}
+  Pop $1
+!macroend
+
+; Called from two places with two different meanings for Abort, both of them the
+; one we want: on a page-leave callback it means "stay on this page", inside a
+; section it means "stop the install". Nothing to special-case.
+Function EnsureWritable
+  retry:
+  !insertmacro ModuleLockedInto "$INSTDIR"
+  ${If} $0 == "1"
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION \
+      "$INSTDIR\AxisFlow.pyd cannot be written to.$\r$\n$\r$\nAlmost always this means FreeCAD is running with AxisFlow loaded -- Windows locks the module while it is in use. Close FreeCAD and press Retry.$\r$\n$\r$\n(If FreeCAD is already closed, check that the folder is not read-only.)" \
+      IDRETRY retry
+    Abort
+  ${EndIf}
+FunctionEnd
+
+Function un.EnsureWritable
+  retry:
+  !insertmacro ModuleLockedInto "$INSTDIR"
+  ${If} $0 == "1"
+    MessageBox MB_RETRYCANCEL|MB_ICONEXCLAMATION \
+      "$INSTDIR\AxisFlow.pyd cannot be removed -- FreeCAD is most likely running with AxisFlow loaded.$\r$\n$\r$\nClose FreeCAD and press Retry." \
+      IDRETRY retry
+    Abort
+  ${EndIf}
+FunctionEnd
+
 ; ---- pick a sensible default install dir ----
 Function .onInit
-  ; Remind to close FreeCAD (the .pyd is locked while it runs).
-  MessageBox MB_OKCANCEL|MB_ICONEXCLAMATION "Please CLOSE FreeCAD before installing ${APPNAME}.$\r$\n$\r$\nContinue?" IDOK continue
-  Abort
-  continue:
+  ; No "please close FreeCAD" nag here any more: EnsureWritable checks for real
+  ; when the user leaves the directory page, and again before the first file is
+  ; written. A prompt nobody can act on yet is just a click to dismiss.
 
   ; Prior install wins; else prefer the versioned FreeCAD 1.1 data dir; else plain.
   ReadRegStr $0 HKCU "Software\${APPNAME}" "InstallDir"
@@ -94,6 +186,10 @@ FunctionEnd
 Section "AxisFlow (required)" SecMain
   SectionIn RO
   SetOverwrite on
+
+  ; Again: the directory page may have been left minutes ago, and FreeCAD is
+  ; exactly the sort of thing a user reopens to check something first.
+  Call EnsureWritable
 
   SetOutPath "$INSTDIR"
 
@@ -141,6 +237,10 @@ SectionEnd
 
 ; ---- uninstall ----
 Section "Uninstall"
+  ; RMDir /r silently skips what it cannot delete, so without this the
+  ; uninstaller would report success and leave the .pyd (and the folder) behind.
+  Call un.EnsureWritable
+
   ; Safety net: only wipe the folder if it really holds our module, so a
   ; mis-chosen $INSTDIR can never take an unrelated folder with it.
   IfFileExists "$INSTDIR\AxisFlow.pyd" 0 +2
